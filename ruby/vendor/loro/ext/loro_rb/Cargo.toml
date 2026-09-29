@@ -1,0 +1,16 @@
+[package]
+name = "loro_rb"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# A source gem may be installed below an unrelated Cargo workspace.
+[workspace]
+
+[lib]
+name = "loro_rb"
+crate-type = ["cdylib"]
+
+[dependencies]
+loro = "=1.13.7"
+magnus = "0.8"

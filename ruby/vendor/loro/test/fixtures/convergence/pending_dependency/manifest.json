@@ -1,0 +1,22 @@
+{
+  "peers": [
+    30
+  ],
+  "description": "The second update depends on the first and may be delivered before it.",
+  "operations": {
+    "30": [
+      [
+        "document",
+        "set",
+        "first",
+        1
+      ],
+      [
+        "document",
+        "set",
+        "second",
+        2
+      ]
+    ]
+  }
+}

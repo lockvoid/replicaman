@@ -1,0 +1,85 @@
+name: ReplicaMan verification
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, xcode-27]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: jdx/mise-action@v2
+      - name: PostgreSQL on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql libpq-dev
+          sudo systemctl start postgresql
+          sudo -u postgres createuser --superuser "$USER"
+          echo PGHOST=/var/run/postgresql >> "$GITHUB_ENV"
+          sudo -u postgres psql -c "ALTER USER \"$USER\" PASSWORD 'replicaman-ci-only'"
+          echo PGPASSWORD=replicaman-ci-only >> "$GITHUB_ENV"
+      - name: PostgreSQL on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install postgresql@17
+          brew services start postgresql@17
+          echo "$(brew --prefix postgresql@17)/bin" >> "$GITHUB_PATH"
+      - name: Build bindings and Ruby dependencies
+        run: |
+          mise run build:loro-kotlin
+          (cd ruby && bundle install && bundle exec rake loro:compile)
+      - name: Contracts and suites without Swift
+        if: runner.os == 'Linux'
+        run: |
+          mise run test:codegen
+          mise run test:kotlin
+          mise run test:rust
+          mise run test:rails
+          mise run test:loro-ruby
+      - name: Every suite and the real multi-client E2E
+        if: runner.os == 'macOS'
+        run: |
+          mise run test
+          mise run e2e
+      - name: Assemble source and JVM packages
+        run: ruby tools/package.rb --rust --ruby --jvm
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: evidence-${{ matrix.os }}
+          path: |
+            build/e2e
+            build/packages
+            kotlin/build/maven
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: jdx/mise-action@v2
+      - name: Android native toolchain
+        run: |
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk --version 4.1.2 --locked
+          sdkmanager 'platforms;android-37.2' 'ndk;28.2.13676358'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      - name: Build and verify native payload and AAR
+        run: |
+          kotlin/gradlew -p kotlin -Pandroid=true :loro-android:cargoBuildAndroid
+          ruby tools/package.rb --android
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-packages
+          path: kotlin/build/maven

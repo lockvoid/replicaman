@@ -1,0 +1,6 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+abort 'ReplicaMan codegen requires Ruby 3.4 or newer' if Gem::Version.new(RUBY_VERSION) < Gem::Version.new('3.4')
+require_relative '../lib/cli'
+exit ReplicaCodegen::CLI.run(ARGV)

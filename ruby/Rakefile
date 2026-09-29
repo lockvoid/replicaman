@@ -1,0 +1,22 @@
+require 'bundler/setup'
+require 'rake/testtask'
+
+Rake::TestTask.new(:test) do |t|
+  t.libs << 'test'
+  t.pattern = 'test/**/*_test.rb'
+  t.verbose = false
+end
+
+namespace :loro do
+  desc 'Compile the vendored Loro binding'
+  task :compile do
+    Dir.chdir('vendor/loro') { sh 'bundle exec rake compile' }
+  end
+
+  desc 'Run the vendored Loro binding suite'
+  task :test do
+    Dir.chdir('vendor/loro') { sh 'bundle exec rake test' }
+  end
+end
+
+task default: :test

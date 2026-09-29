@@ -1,0 +1,33 @@
+{
+  "peers": [
+    10,
+    11,
+    12
+  ],
+  "description": "Two peers edit different keys in the same pre-existing nested map.",
+  "operations": {
+    "10": [
+      [
+        "root",
+        "set_map",
+        "child"
+      ]
+    ],
+    "11": [
+      [
+        "root.child",
+        "set",
+        "left",
+        1
+      ]
+    ],
+    "12": [
+      [
+        "root.child",
+        "set",
+        "right",
+        2
+      ]
+    ]
+  }
+}

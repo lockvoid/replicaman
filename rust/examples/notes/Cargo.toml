@@ -1,0 +1,9 @@
+[package]
+name = "replicaman-notes-example"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+replicaman = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

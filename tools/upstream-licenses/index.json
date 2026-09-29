@@ -1,0 +1,112 @@
+{
+  "append-only-bytes@0.1.12": {
+    "repository": "zxch3n/append-only-bytes",
+    "revision": "5ee04bd3e3249c6bfeb9c3d31644ada87bb90cbe",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/zxch3n/append-only-bytes/5ee04bd3e3249c6bfeb9c3d31644ada87bb90cbe/LICENSE"
+    }
+  },
+  "arref@0.1.0": {
+    "repository": "zxch3n/arref",
+    "revision": "57fb0d2eedc68c3d9a9bd3fc4fd8fa5b6f9ae78f",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/zxch3n/arref/57fb0d2eedc68c3d9a9bd3fc4fd8fa5b6f9ae78f/LICENSE"
+    }
+  },
+  "generic-btree@0.10.7": {
+    "repository": "loro-dev/generic-btree",
+    "revision": "f88a9f7ff4e442fc4f6aebfaa30496652b92decd",
+    "files": {}
+  },
+  "loro-internal@1.13.9": {
+    "repository": "loro-dev/loro",
+    "revision": "1e529a6841b35572b05c3cb1258c0862b3aaef40",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/loro-dev/loro/1e529a6841b35572b05c3cb1258c0862b3aaef40/LICENSE"
+    }
+  },
+  "serde_columnar@0.3.14": {
+    "repository": "loro-dev/columnar",
+    "revision": "06663cfc569c6c770b28688f015f8a87fc04e156",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/loro-dev/columnar/06663cfc569c6c770b28688f015f8a87fc04e156/LICENSE"
+    }
+  },
+  "valuable@0.1.1": {
+    "repository": "tokio-rs/valuable",
+    "revision": "9efc29b6e58cef28f6566a47aa7e142a55fead77",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/tokio-rs/valuable/9efc29b6e58cef28f6566a47aa7e142a55fead77/LICENSE"
+    }
+  },
+  "uniffi@0.31.1": {
+    "repository": "mozilla/uniffi-rs",
+    "revision": "ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/mozilla/uniffi-rs/ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a/LICENSE"
+    }
+  },
+  "uniffi_bindgen@0.31.1": {
+    "repository": "mozilla/uniffi-rs",
+    "revision": "ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/mozilla/uniffi-rs/ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a/LICENSE"
+    }
+  },
+  "uniffi_build@0.31.1": {
+    "repository": "mozilla/uniffi-rs",
+    "revision": "ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/mozilla/uniffi-rs/ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a/LICENSE"
+    }
+  },
+  "uniffi_core@0.31.1": {
+    "repository": "mozilla/uniffi-rs",
+    "revision": "ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/mozilla/uniffi-rs/ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a/LICENSE"
+    }
+  },
+  "uniffi_internal_macros@0.31.1": {
+    "repository": "mozilla/uniffi-rs",
+    "revision": "ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/mozilla/uniffi-rs/ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a/LICENSE"
+    }
+  },
+  "uniffi_macros@0.31.1": {
+    "repository": "mozilla/uniffi-rs",
+    "revision": "ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/mozilla/uniffi-rs/ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a/LICENSE"
+    }
+  },
+  "uniffi_meta@0.31.1": {
+    "repository": "mozilla/uniffi-rs",
+    "revision": "ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/mozilla/uniffi-rs/ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a/LICENSE"
+    }
+  },
+  "uniffi_pipeline@0.31.1": {
+    "repository": "mozilla/uniffi-rs",
+    "revision": "ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/mozilla/uniffi-rs/ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a/LICENSE"
+    }
+  },
+  "uniffi_udl@0.31.1": {
+    "repository": "mozilla/uniffi-rs",
+    "revision": "ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/mozilla/uniffi-rs/ec08cf9db85e938c37e2ecb4a5dec5ad4a68f95a/LICENSE"
+    }
+  },
+  "loro-internal@1.13.6": {
+    "repository": "loro-dev/loro",
+    "revision": "8aed9e45f773fbbc246b7b195ab1a4694ac8e070",
+    "files": {
+      "LICENSE": "https://raw.githubusercontent.com/loro-dev/loro/8aed9e45f773fbbc246b7b195ab1a4694ac8e070/LICENSE"
+    }
+  }
+}

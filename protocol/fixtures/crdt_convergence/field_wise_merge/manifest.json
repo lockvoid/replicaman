@@ -1,0 +1,11 @@
+{
+  "name": "field_wise_merge",
+  "description": "Two devices edit different fields of one card. Both edits land.",
+  "blobs": [
+    "base.bin",
+    "left.bin",
+    "right.bin"
+  ],
+  "left_peer": 11,
+  "right_peer": 22
+}

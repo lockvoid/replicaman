@@ -1,0 +1,38 @@
+{
+  "rows": [
+    {
+      "stream": "notes",
+      "id": "a",
+      "incarnation": "life-a",
+      "revision": "1"
+    },
+    {
+      "stream": "notes",
+      "id": "z",
+      "incarnation": "life-z",
+      "revision": "9007199254740993"
+    },
+    {
+      "stream": "notes",
+      "id": "é/🙂",
+      "incarnation": "life-e",
+      "revision": "2"
+    }
+  ],
+  "view_digest": "785a421218d35d83882f196bcd96322c50a0f5f757d3c78177325d6025dd8a9e",
+  "empty_view_digest": "a89ca56fd82a4dda8d4bcde6ac8d22513c75d5a1c366067991a4dcafbd1e03ea",
+  "base": {
+    "fields": [
+      "notes",
+      "é/🙂",
+      "user",
+      "life-e",
+      "2",
+      null,
+      "{\"n\":9007199254740993}",
+      "loro@1"
+    ],
+    "fold_base64": "AAH/"
+  },
+  "base_digest": "1b7cd70e51b215dda0e84acee571ef7db23805ef57ac2e0ce8081e29a5bd05a0"
+}

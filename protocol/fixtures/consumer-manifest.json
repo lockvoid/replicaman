@@ -1,0 +1,1046 @@
+{
+  "version": 1,
+  "namespace": "replicaman-test",
+  "schemaVersion": 1,
+  "streams": [
+    {
+      "name": "boards",
+      "lane": "document",
+      "codec": "loro@1",
+      "readonly": false,
+      "shard": "user",
+      "sti": false,
+      "columns": [
+        {
+          "name": "name",
+          "type": "string",
+          "null": true,
+          "push": false,
+          "pull": true,
+          "reflects": [
+            "meta",
+            "name"
+          ]
+        },
+        {
+          "name": "userId",
+          "type": "string",
+          "null": false,
+          "push": true,
+          "pull": true
+        }
+      ],
+      "shapes": {
+        "meta": {
+          "type": "object",
+          "fields": [
+            {
+              "name": "name",
+              "type": "string",
+              "null": false,
+              "default": "Untitled"
+            }
+          ]
+        }
+      },
+      "default": {
+        "meta": {
+          "name": "Untitled"
+        }
+      }
+    },
+    {
+      "name": "decks",
+      "lane": "document",
+      "codec": "loro@1",
+      "readonly": false,
+      "shard": "user",
+      "sti": false,
+      "columns": [
+        {
+          "name": "changeSeq",
+          "type": "integer",
+          "null": false,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime",
+          "null": false,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "slideCount",
+          "type": "integer",
+          "null": true,
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime",
+          "null": false,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "userId",
+          "type": "integer",
+          "null": false,
+          "push": true,
+          "pull": true
+        }
+      ],
+      "indexes": [
+        {
+          "field": "updatedAt",
+          "kind": "btree"
+        }
+      ],
+      "shapes": {
+        "layouts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "backgroundColor",
+                "type": "hex_color",
+                "null": true
+              },
+              {
+                "name": "columns",
+                "type": "integer",
+                "null": false,
+                "default": 1
+              },
+              {
+                "name": "key",
+                "type": "string",
+                "null": false
+              },
+              {
+                "name": "name",
+                "type": "string",
+                "null": false
+              },
+              {
+                "name": "visible",
+                "type": "boolean",
+                "null": false,
+                "default": true
+              }
+            ]
+          }
+        },
+        "settings": {
+          "type": "object",
+          "fields": [
+            {
+              "name": "accentColor",
+              "type": "hex_color",
+              "null": true
+            },
+            {
+              "name": "aspectRatio",
+              "type": "string",
+              "null": false,
+              "enum": [
+                "4:3",
+                "16:9"
+              ],
+              "default": "16:9"
+            },
+            {
+              "name": "autoplay",
+              "type": "boolean",
+              "null": false,
+              "default": false
+            },
+            {
+              "name": "loopCount",
+              "type": "integer",
+              "null": false,
+              "default": 0
+            }
+          ]
+        },
+        "slides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "duration",
+                "type": "float",
+                "null": false
+              },
+              {
+                "name": "fitMode",
+                "type": "string",
+                "null": false,
+                "enum": [
+                  "auto",
+                  "contain",
+                  "cover"
+                ],
+                "default": "auto"
+              },
+              {
+                "name": "key",
+                "type": "string",
+                "null": false
+              },
+              {
+                "name": "layoutKey",
+                "type": "string",
+                "null": false
+              },
+              {
+                "name": "opacity",
+                "type": "float",
+                "null": false,
+                "default": 1.0
+              },
+              {
+                "name": "start",
+                "type": "float",
+                "null": false
+              },
+              {
+                "name": "style",
+                "type": "object",
+                "null": true,
+                "fields": [
+                  {
+                    "name": "fillColor",
+                    "type": "hex_color",
+                    "null": true
+                  },
+                  {
+                    "name": "shadowOffset",
+                    "type": "object",
+                    "null": true,
+                    "fields": [
+                      {
+                        "name": "x",
+                        "type": "float",
+                        "null": false,
+                        "default": 0.0
+                      },
+                      {
+                        "name": "y",
+                        "type": "float",
+                        "null": false,
+                        "default": 0.0
+                      }
+                    ]
+                  },
+                  {
+                    "name": "textDecoration",
+                    "type": "array",
+                    "null": true,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "underline",
+                        "strikethrough"
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "default": {
+        "layouts": [
+          {
+            "backgroundColor": null,
+            "columns": 1,
+            "key": "title",
+            "name": "Title",
+            "visible": true
+          }
+        ],
+        "settings": {
+          "accentColor": null,
+          "aspectRatio": "16:9",
+          "autoplay": false,
+          "loopCount": 0
+        }
+      }
+    },
+    {
+      "name": "exports",
+      "lane": "row",
+      "readonly": false,
+      "shard": "user",
+      "sti": false,
+      "columns": [
+        {
+          "name": "details",
+          "type": "jsonb",
+          "null": true,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "markers",
+          "type": "array",
+          "null": false,
+          "items": {
+            "type": "float"
+          },
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "progress",
+          "type": "float",
+          "null": false,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "result",
+          "type": "jsonb",
+          "null": false,
+          "shapes": {
+            "discriminator": "kind",
+            "variants": [
+              {
+                "value": "image",
+                "type": "Image",
+                "fields": [
+                  {
+                    "name": "colorSpace",
+                    "type": "string",
+                    "null": true,
+                    "enum": [
+                      "sdr",
+                      "hdr"
+                    ]
+                  },
+                  {
+                    "name": "height",
+                    "type": "integer",
+                    "null": false
+                  },
+                  {
+                    "name": "histogram",
+                    "type": "array",
+                    "null": true,
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  {
+                    "name": "width",
+                    "type": "integer",
+                    "null": false
+                  }
+                ]
+              },
+              {
+                "value": "video",
+                "type": "Video",
+                "fields": [
+                  {
+                    "name": "colorSpace",
+                    "type": "string",
+                    "null": true,
+                    "enum": [
+                      "sdr",
+                      "hdr"
+                    ]
+                  },
+                  {
+                    "name": "duration",
+                    "type": "float",
+                    "null": false
+                  },
+                  {
+                    "name": "frameRate",
+                    "type": "float",
+                    "null": true
+                  },
+                  {
+                    "name": "keyframes",
+                    "type": "array",
+                    "null": true,
+                    "items": {
+                      "type": "float"
+                    },
+                    "default": []
+                  },
+                  {
+                    "name": "mutedTracks",
+                    "type": "array",
+                    "null": true,
+                    "items": {
+                      "type": "boolean"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "userId",
+          "type": "string",
+          "null": false,
+          "push": true,
+          "pull": true
+        }
+      ]
+    },
+    {
+      "name": "item_templates",
+      "lane": "row",
+      "readonly": false,
+      "shard": "user",
+      "sti": true,
+      "columns": [
+        {
+          "name": "name",
+          "type": "string",
+          "null": false,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "userId",
+          "type": "string",
+          "null": false,
+          "push": true,
+          "pull": true
+        }
+      ],
+      "variants": [
+        {
+          "type": "PhotoItem",
+          "columns": [
+            {
+              "name": "aspect",
+              "type": "string",
+              "null": true,
+              "push": true,
+              "pull": true
+            },
+            {
+              "name": "tone",
+              "type": "string",
+              "null": true,
+              "enum": [
+                "light",
+                "dark"
+              ],
+              "push": true,
+              "pull": true
+            }
+          ]
+        },
+        {
+          "type": "TextItem",
+          "columns": [
+            {
+              "name": "body",
+              "type": "string",
+              "null": true,
+              "push": true,
+              "pull": true
+            },
+            {
+              "name": "tone",
+              "type": "string",
+              "null": true,
+              "enum": [
+                "light",
+                "dark"
+              ],
+              "push": true,
+              "pull": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "items",
+      "lane": "row",
+      "readonly": false,
+      "shard": "user",
+      "sti": true,
+      "columns": [
+        {
+          "name": "annotation",
+          "type": "string",
+          "null": true,
+          "push": true,
+          "pull": false
+        },
+        {
+          "name": "boardId",
+          "type": "string",
+          "null": false,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "null": true,
+          "enum": [
+            "idea",
+            "task"
+          ],
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "rank",
+          "type": "string",
+          "null": false,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "rankBadge",
+          "type": "string",
+          "null": true,
+          "push": false,
+          "pull": true
+        }
+      ],
+      "indexes": [
+        {
+          "field": "boardId",
+          "kind": "btree"
+        }
+      ],
+      "variants": [
+        {
+          "type": "PhotoItem",
+          "columns": [
+            {
+              "name": "caption",
+              "type": "string",
+              "null": true,
+              "enum": [
+                "wide",
+                "square"
+              ],
+              "push": true,
+              "pull": true
+            },
+            {
+              "name": "width",
+              "type": "integer",
+              "null": true,
+              "push": true,
+              "pull": true
+            }
+          ]
+        },
+        {
+          "type": "TextItem",
+          "columns": [
+            {
+              "name": "body",
+              "type": "string",
+              "null": false,
+              "push": true,
+              "pull": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "jobs",
+      "lane": "row",
+      "readonly": true,
+      "shard": "user",
+      "sti": false,
+      "columns": [
+        {
+          "name": "payload",
+          "type": "jsonb",
+          "null": true,
+          "shapes": {
+            "discriminator": "kind",
+            "variants": [
+              {
+                "value": "empty",
+                "type": "Empty",
+                "fields": [
+                  {
+                    "name": "reasonCode",
+                    "type": "string",
+                    "null": true
+                  }
+                ]
+              },
+              {
+                "value": "ready",
+                "type": "Ready",
+                "fields": [
+                  {
+                    "name": "displayName",
+                    "type": "string",
+                    "null": false
+                  },
+                  {
+                    "name": "history",
+                    "type": "array",
+                    "null": false,
+                    "items": {
+                      "type": "object",
+                      "fields": [
+                        {
+                          "name": "meanConfidence",
+                          "type": "float",
+                          "null": true
+                        },
+                        {
+                          "name": "sampleCount",
+                          "type": "integer",
+                          "null": true
+                        }
+                      ]
+                    },
+                    "default": []
+                  },
+                  {
+                    "name": "metrics",
+                    "type": "object",
+                    "null": true,
+                    "fields": [
+                      {
+                        "name": "meanConfidence",
+                        "type": "float",
+                        "null": true
+                      },
+                      {
+                        "name": "sampleCount",
+                        "type": "integer",
+                        "null": true
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "priority",
+          "type": "string",
+          "null": false,
+          "enum": [
+            "low",
+            "high"
+          ],
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "state",
+          "type": "string",
+          "null": false,
+          "enum": [
+            "queued",
+            "running",
+            "done"
+          ],
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "summary",
+          "type": "json",
+          "null": true,
+          "shapes": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "active",
+                "type": "boolean",
+                "null": false,
+                "default": false
+              },
+              {
+                "name": "labels",
+                "type": "array",
+                "null": true,
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "system",
+                    "custom"
+                  ]
+                },
+                "default": []
+              },
+              {
+                "name": "metricsByKey",
+                "type": "map",
+                "null": false,
+                "values": {
+                  "type": "object",
+                  "fields": [
+                    {
+                      "name": "meanConfidence",
+                      "type": "float",
+                      "null": true
+                    },
+                    {
+                      "name": "sampleCount",
+                      "type": "integer",
+                      "null": true
+                    }
+                  ]
+                },
+                "default": {}
+              },
+              {
+                "name": "state",
+                "type": "string",
+                "null": true,
+                "enum": [
+                  "queued",
+                  "running",
+                  "done"
+                ],
+                "default": "queued"
+              },
+              {
+                "name": "token",
+                "type": "string",
+                "null": true
+              }
+            ]
+          },
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "tags",
+          "type": "array",
+          "null": false,
+          "items": {
+            "type": "string"
+          },
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "userId",
+          "type": "string",
+          "null": false,
+          "push": false,
+          "pull": true
+        }
+      ]
+    },
+    {
+      "name": "tallies",
+      "lane": "row",
+      "readonly": false,
+      "shard": "user",
+      "sti": false,
+      "columns": [
+        {
+          "name": "count",
+          "type": "integer",
+          "null": false,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "null": false,
+          "push": true,
+          "pull": true,
+          "precondition": true
+        },
+        {
+          "name": "userId",
+          "type": "string",
+          "null": false,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "null": false,
+          "push": true,
+          "pull": true,
+          "precondition": true
+        }
+      ]
+    },
+    {
+      "name": "themes",
+      "lane": "row",
+      "readonly": false,
+      "shard": "user",
+      "sti": false,
+      "columns": [
+        {
+          "name": "colors",
+          "type": "jsonb",
+          "null": false,
+          "shapes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "fields": [
+                {
+                  "name": "hex",
+                  "type": "string",
+                  "null": false
+                },
+                {
+                  "name": "id",
+                  "type": "string",
+                  "null": false
+                }
+              ]
+            }
+          },
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "createdAt",
+          "type": "datetime",
+          "null": false,
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "null": true,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "heading",
+          "type": "jsonb",
+          "null": true,
+          "shapes": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "font",
+                "type": "object",
+                "null": true,
+                "fields": [
+                  {
+                    "name": "family",
+                    "type": "string",
+                    "null": false
+                  },
+                  {
+                    "name": "slant",
+                    "type": "string",
+                    "null": true,
+                    "enum": [
+                      "upright",
+                      "italic"
+                    ],
+                    "default": "upright"
+                  },
+                  {
+                    "name": "weight",
+                    "type": "integer",
+                    "null": true,
+                    "default": 400
+                  }
+                ]
+              },
+              {
+                "name": "uppercase",
+                "type": "boolean",
+                "null": false,
+                "default": false
+              }
+            ]
+          },
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "logoRef",
+          "type": "string",
+          "null": true,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "logoUrl",
+          "type": "string",
+          "null": true,
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "null": false,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "pinned",
+          "type": "boolean",
+          "null": true,
+          "push": true,
+          "pull": true
+        },
+        {
+          "name": "updatedAt",
+          "type": "datetime",
+          "null": false,
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "userId",
+          "type": "integer",
+          "null": false,
+          "push": false,
+          "pull": true
+        }
+      ]
+    },
+    {
+      "name": "tickets",
+      "lane": "row",
+      "readonly": true,
+      "shard": "user",
+      "sti": false,
+      "columns": [
+        {
+          "name": "note",
+          "type": "string",
+          "null": true,
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "userId",
+          "type": "string",
+          "null": false,
+          "push": false,
+          "pull": true
+        }
+      ],
+      "indexes": [
+        {
+          "field": "note",
+          "kind": "fts5"
+        },
+        {
+          "field": "userId",
+          "kind": "btree"
+        }
+      ]
+    },
+    {
+      "name": "workflows",
+      "lane": "row",
+      "readonly": true,
+      "shard": "global",
+      "sti": false,
+      "columns": [
+        {
+          "name": "graph",
+          "type": "jsonb",
+          "null": false,
+          "shapes": {
+            "type": "object",
+            "fields": [
+              {
+                "name": "links",
+                "type": "map",
+                "null": false,
+                "values": {
+                  "type": "object",
+                  "fields": [
+                    {
+                      "name": "from",
+                      "type": "string",
+                      "null": false
+                    },
+                    {
+                      "name": "index",
+                      "type": "integer",
+                      "null": false,
+                      "default": 0
+                    },
+                    {
+                      "name": "to",
+                      "type": "string",
+                      "null": false
+                    }
+                  ]
+                },
+                "default": {}
+              },
+              {
+                "name": "publishedAt",
+                "type": "datetime",
+                "null": true
+              },
+              {
+                "name": "steps",
+                "type": "map",
+                "null": false,
+                "values": {
+                  "type": "object",
+                  "fields": [
+                    {
+                      "name": "kind",
+                      "type": "string",
+                      "null": false
+                    },
+                    {
+                      "name": "options",
+                      "type": "json",
+                      "null": false,
+                      "default": {}
+                    }
+                  ]
+                },
+                "default": {}
+              }
+            ]
+          },
+          "push": false,
+          "pull": true
+        },
+        {
+          "name": "version",
+          "type": "integer",
+          "null": false,
+          "push": false,
+          "pull": true
+        }
+      ]
+    }
+  ]
+}

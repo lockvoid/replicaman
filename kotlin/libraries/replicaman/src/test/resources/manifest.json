@@ -1,0 +1,371 @@
+{
+ "version": 1,
+  "namespace": "replicaman-test",
+  "schemaVersion": 1,
+ "streams": [
+  {
+   "name": "boards",
+   "lane": "document",
+   "codec": "loro@1",
+   "readonly": false,
+   "shard": "user",
+   "sti": false,
+   "columns": [
+    {
+     "name": "name",
+     "type": "string",
+     "null": true,
+     "push": false,
+     "pull": true,
+     "reflects": [
+      "meta",
+      "name"
+     ]
+    },
+    {
+     "name": "userId",
+     "type": "string",
+     "null": false,
+     "push": true,
+     "pull": true
+    }
+   ],
+   "shapes": {
+    "meta": {
+     "type": "object",
+     "fields": [
+      {
+       "name": "name",
+       "type": "string",
+       "null": false,
+       "default": "Untitled"
+      }
+     ]
+    }
+   },
+   "default": {
+    "meta": {
+     "name": "Untitled"
+    }
+   }
+  },
+  {
+   "name": "items",
+   "lane": "row",
+   "readonly": false,
+   "shard": "user",
+   "sti": true,
+   "columns": [
+    {
+     "name": "boardId",
+     "type": "string",
+     "null": false,
+     "push": true,
+     "pull": true
+    },
+    {
+     "name": "label",
+     "type": "string",
+     "null": true,
+     "enum": [
+      "idea",
+      "task"
+     ],
+     "push": true,
+     "pull": true
+    },
+    {
+     "name": "rank",
+     "type": "string",
+     "null": false,
+     "push": true,
+     "pull": true
+    },
+    {
+     "name": "rankBadge",
+     "type": "string",
+     "null": true,
+     "push": false,
+     "pull": true
+    },
+    {
+     "name": "stagedPreview",
+     "type": "string",
+     "null": true,
+     "push": true,
+     "pull": false
+    },
+    {
+     "name": "tags",
+     "type": "array",
+     "null": true,
+     "items": {
+      "type": "string"
+     },
+     "push": true,
+     "pull": true
+    }
+   ],
+   "indexes": [
+    {
+     "field": "boardId",
+     "kind": "btree"
+    }
+   ],
+   "variants": [
+    {
+     "type": "PhotoItem",
+     "columns": [
+      {
+       "name": "caption",
+       "type": "string",
+       "null": true,
+       "enum": [
+        "wide",
+        "square"
+       ],
+       "push": true,
+       "pull": true
+      },
+      {
+       "name": "width",
+       "type": "integer",
+       "null": true,
+       "push": true,
+       "pull": true
+      }
+     ]
+    },
+    {
+     "type": "TextItem",
+     "columns": [
+      {
+       "name": "body",
+       "type": "string",
+       "null": false,
+       "push": true,
+       "pull": true
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "jobs",
+   "lane": "row",
+   "readonly": true,
+   "shard": "user",
+   "sti": false,
+   "columns": [
+    {
+     "name": "payload",
+     "type": "jsonb",
+     "null": true,
+     "shapes": {
+      "discriminator": "kind",
+      "variants": [
+       {
+        "value": "empty",
+        "type": "Empty",
+        "fields": [
+         {
+          "name": "reasonCode",
+          "type": "string",
+          "null": true
+         }
+        ]
+       },
+       {
+        "value": "ready",
+        "type": "Ready",
+        "fields": [
+         {
+          "name": "displayName",
+          "type": "string",
+          "null": false
+         },
+         {
+          "name": "history",
+          "type": "array",
+          "null": false,
+          "items": {
+           "type": "object",
+           "fields": [
+            {
+             "name": "meanConfidence",
+             "type": "float",
+             "null": true
+            },
+            {
+             "name": "sampleCount",
+             "type": "integer",
+             "null": true
+            }
+           ]
+          },
+          "default": []
+         },
+         {
+          "name": "metrics",
+          "type": "object",
+          "null": true,
+          "fields": [
+           {
+            "name": "meanConfidence",
+            "type": "float",
+            "null": true
+           },
+           {
+            "name": "sampleCount",
+            "type": "integer",
+            "null": true
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     "push": false,
+     "pull": true
+    },
+    {
+     "name": "priority",
+     "type": "string",
+     "null": false,
+     "enum": [
+      "low",
+      "high"
+     ],
+     "push": false,
+     "pull": true
+    },
+    {
+     "name": "state",
+     "type": "string",
+     "null": false,
+     "enum": [
+      "queued",
+      "running",
+      "done"
+     ],
+     "push": false,
+     "pull": true
+    },
+    {
+     "name": "summary",
+     "type": "json",
+     "null": true,
+     "shapes": {
+      "type": "object",
+      "fields": [
+       {
+        "name": "active",
+        "type": "boolean",
+        "null": false,
+        "default": false
+       },
+       {
+        "name": "labels",
+        "type": "array",
+        "null": true,
+        "items": {
+         "type": "string",
+         "enum": [
+          "system",
+          "custom"
+         ]
+        },
+        "default": []
+       },
+       {
+        "name": "metricsByKey",
+        "type": "map",
+        "null": false,
+        "values": {
+         "type": "object",
+         "fields": [
+          {
+           "name": "meanConfidence",
+           "type": "float",
+           "null": true
+          },
+          {
+           "name": "sampleCount",
+           "type": "integer",
+           "null": true
+          }
+         ]
+        },
+        "default": {}
+       },
+       {
+        "name": "state",
+        "type": "string",
+        "null": true,
+        "enum": [
+         "queued",
+         "running",
+         "done"
+        ],
+        "default": "queued"
+       }
+      ]
+     },
+     "push": false,
+     "pull": true
+    },
+    {
+     "name": "tags",
+     "type": "array",
+     "null": false,
+     "items": {
+      "type": "string"
+     },
+     "push": false,
+     "pull": true
+    },
+    {
+     "name": "userId",
+     "type": "string",
+     "null": false,
+     "push": false,
+     "pull": true
+    }
+   ]
+  },
+  {
+   "name": "tickets",
+   "lane": "row",
+   "readonly": true,
+   "shard": "user",
+   "sti": false,
+   "columns": [
+    {
+     "name": "note",
+     "type": "string",
+     "null": true,
+     "push": false,
+     "pull": true
+    },
+    {
+     "name": "userId",
+     "type": "string",
+     "null": false,
+     "push": false,
+     "pull": true
+    }
+   ],
+   "indexes": [
+    {
+     "field": "note",
+     "kind": "fts5"
+    },
+    {
+     "field": "userId",
+     "kind": "btree"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,22 @@
+#!/usr/bin/env ruby
+require 'optparse'
+require 'replica_man/database_restore'
+
+options = {}
+parser = OptionParser.new do |args|
+  args.banner = 'Usage: replicaman-restore --backup FILE --epoch-file FILE --service-stopped'
+  args.separator 'DATABASE_URL must identify a new, empty PostgreSQL database.'
+  args.on('--backup FILE') { options[:backup] = it }
+  args.on('--epoch-file FILE') { options[:epoch_file] = it }
+  args.on('--service-stopped', 'Confirm all application servers and jobs are stopped') { options[:stopped] = true }
+end
+parser.parse!
+abort parser.to_s unless options.fetch(:stopped, false) && options.key?(:backup) && options.key?(:epoch_file) && ARGV.empty?
+
+epoch = ReplicaMan::DatabaseRestore.call(
+  database_url: ENV.fetch('DATABASE_URL'),
+  backup: options.fetch(:backup),
+  epoch_file: options.fetch(:epoch_file)
+)
+puts "Restore complete. Dataset epoch: #{epoch}"
+puts 'Configure every server with REPLICAMAN_DATASET_EPOCH_FILE before resuming synchronization.'

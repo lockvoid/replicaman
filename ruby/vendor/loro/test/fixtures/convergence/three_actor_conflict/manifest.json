@@ -1,0 +1,52 @@
+{
+  "peers": [
+    41,
+    42,
+    43
+  ],
+  "description": "Three independent actors preserve unique keys and deterministically resolve a shared key.",
+  "operations": {
+    "41": [
+      [
+        "document",
+        "set",
+        "peer_41",
+        41
+      ],
+      [
+        "document",
+        "set",
+        "winner",
+        41
+      ]
+    ],
+    "42": [
+      [
+        "document",
+        "set",
+        "peer_42",
+        42
+      ],
+      [
+        "document",
+        "set",
+        "winner",
+        42
+      ]
+    ],
+    "43": [
+      [
+        "document",
+        "set",
+        "peer_43",
+        43
+      ],
+      [
+        "document",
+        "set",
+        "winner",
+        43
+      ]
+    ]
+  }
+}

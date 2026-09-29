@@ -1,0 +1,33 @@
+{
+  "peers": [
+    20,
+    21,
+    22
+  ],
+  "description": "A concurrent delete and replacement of the same map key resolve deterministically.",
+  "operations": {
+    "20": [
+      [
+        "document",
+        "set",
+        "status",
+        "base"
+      ]
+    ],
+    "21": [
+      [
+        "document",
+        "delete",
+        "status"
+      ]
+    ],
+    "22": [
+      [
+        "document",
+        "set",
+        "status",
+        "updated"
+      ]
+    ]
+  }
+}

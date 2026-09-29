@@ -1,0 +1,11 @@
+{
+  "name": "unknown_fields_roundtrip",
+  "description": "A field neither platform models survives an edit from a peer that has never heard of it.",
+  "blobs": [
+    "base.bin",
+    "left.bin",
+    "right.bin"
+  ],
+  "left_peer": 11,
+  "right_peer": 22
+}

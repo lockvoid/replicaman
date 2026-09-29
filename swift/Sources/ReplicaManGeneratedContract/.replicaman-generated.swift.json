@@ -1,0 +1,17 @@
+[
+  "Board+Defaults.swift",
+  "Board.swift",
+  "BoardDocument.swift",
+  "Deck+Defaults.swift",
+  "Deck.swift",
+  "DeckDocument.swift",
+  "Export.swift",
+  "Item.swift",
+  "ItemTemplate.swift",
+  "Job.swift",
+  "SampleReplica.swift",
+  "Tally.swift",
+  "Theme.swift",
+  "Ticket.swift",
+  "Workflow.swift"
+]

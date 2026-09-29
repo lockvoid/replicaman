@@ -1,0 +1,24 @@
+# frozen_string_literal: true
+
+require "rake/testtask"
+require "rake/extensiontask"
+
+Rake::ExtensionTask.new("loro_rb") do |ext|
+  ext.lib_dir = "lib/loro"
+  ext.ext_dir = "ext/loro_rb"
+end
+
+Rake::TestTask.new(:test) do |t|
+  t.libs << "test" << "lib"
+  t.test_files = FileList["test/**/*_test.rb"]
+end
+task test: :compile
+
+namespace :fixtures do
+  desc "Regenerate golden convergence fixtures (deterministic; see spec section 8)"
+  task generate: :compile do
+    ruby "test/fixtures/generate.rb"
+  end
+end
+
+task default: :test

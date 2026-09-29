@@ -1,0 +1,64 @@
+-- Archive raw bytes without decoding or collecting an entity's history in memory.
+-- Every statement binds: ?1 recovery id, ?2 stream, ?3 row id.
+INSERT INTO recovery_parts
+SELECT ?1, 'context', '', CAST(json_object(
+    'format', 1, 'namespace', namespace, 'schema', schema_version, 'dataset', dataset,
+    'store', store_id,
+    'stream', ?2, 'row_id', ?3,
+    'predecessor', (SELECT predecessor FROM entities WHERE stream = ?2 AND row_id = ?3)) AS BLOB)
+FROM meta WHERE id = 1;
+
+INSERT INTO recovery_parts
+SELECT ?1, 'row.data', '', CAST(data AS BLOB)
+FROM snapshots WHERE stream = ?2 AND row_id = ?3;
+
+INSERT INTO recovery_parts
+SELECT ?1, 'row.metadata', '', CAST(json_object('shard', shard, 'type', type) AS BLOB)
+FROM snapshots WHERE stream = ?2 AND row_id = ?3;
+
+INSERT INTO recovery_parts
+SELECT ?1, 'document.fold', '', fold
+FROM docs WHERE stream = ?2 AND row_id = ?3;
+
+INSERT INTO recovery_parts
+SELECT ?1, 'document.acknowledged', '', acked
+FROM docs WHERE stream = ?2 AND row_id = ?3 AND acked IS NOT NULL;
+
+INSERT INTO recovery_parts
+SELECT ?1, 'document.metadata', '', CAST(json_object('codec', codec, 'peer', CAST(peer AS TEXT)) AS BLOB)
+FROM docs WHERE stream = ?2 AND row_id = ?3;
+
+INSERT INTO recovery_parts
+SELECT ?1, 'hold.preimage', '', CAST(preimage AS BLOB)
+FROM holds WHERE stream = ?2 AND row_id = ?3;
+
+INSERT INTO recovery_parts
+SELECT ?1, 'hold.metadata', '', CAST(json_object(
+    'gate', gate_id, 'reason', reason, 'sequence', CAST(seq AS TEXT), 'server_knows', server_knows) AS BLOB)
+FROM holds WHERE stream = ?2 AND row_id = ?3;
+
+INSERT INTO recovery_parts
+SELECT ?1, 'intent', id, CAST(payload AS BLOB)
+FROM intents WHERE stream = ?2 AND row_id = ?3;
+
+INSERT INTO recovery_parts
+SELECT ?1, 'intent.preimage', id, CAST(preimage AS BLOB)
+FROM intents WHERE stream = ?2 AND row_id = ?3 AND preimage IS NOT NULL;
+
+INSERT INTO recovery_parts
+SELECT ?1, 'intent.metadata', id, CAST(json_object(
+    'position', rowid, 'state', state, 'lane', lane, 'refusal', reason,
+    'sequence', CAST(sequence AS TEXT), 'operation', operation, 'created_at', created_at) AS BLOB)
+FROM intents WHERE stream = ?2 AND row_id = ?3;
+
+-- Preserve complete frozen groups, including their other addresses.
+INSERT INTO recovery_parts
+SELECT ?1, 'submission', CAST(sequence AS TEXT), content
+FROM submissions WHERE sequence IN (
+    SELECT sequence FROM intents WHERE stream = ?2 AND row_id = ?3 AND state = 'frozen'
+);
+
+INSERT INTO recovery_parts
+SELECT ?1, 'reference', name, CAST(json_object(
+    'stream', target_stream, 'id', target_id, 'incarnation', target_incarnation) AS BLOB)
+FROM entity_references WHERE stream = ?2 AND row_id = ?3;

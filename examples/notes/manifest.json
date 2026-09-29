@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "namespace": "example.notes",
+  "schemaVersion": 1,
+  "streams": [{
+    "name": "notes", "lane": "row", "readonly": false, "shard": "user", "sti": false,
+    "columns": [
+      {"name": "title", "type": "string", "null": false, "push": true, "pull": true},
+      {"name": "userId", "type": "integer", "null": false, "push": true, "pull": true}
+    ]
+  }]
+}

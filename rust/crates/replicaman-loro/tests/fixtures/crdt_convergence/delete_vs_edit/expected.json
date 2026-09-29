@@ -1,0 +1,33 @@
+{
+  "cards": [],
+  "columns": [
+    {
+      "collapsed": false,
+      "key": "doing",
+      "name": "Doing",
+      "rank": 2000
+    },
+    {
+      "collapsed": true,
+      "key": "done",
+      "name": "Done",
+      "rank": 3000
+    },
+    {
+      "collapsed": false,
+      "key": "todo",
+      "name": "To do",
+      "rank": 1000
+    }
+  ],
+  "settings": {
+    "density": "comfortable",
+    "show_avatars": true,
+    "theme": "light",
+    "week_start": "monday",
+    "wip_limit": 0
+  },
+  "meta": {
+    "name": "Fixture"
+  }
+}

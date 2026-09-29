@@ -1,0 +1,15 @@
+source 'https://rubygems.org'
+
+gemspec
+
+gem 'loro', path: 'vendor/loro'
+gem 'minitest'
+gem 'pg'
+gem 'puma'
+gem 'rack-test', require: false
+gem 'rake'
+gem 'rake-compiler'
+gem 'rb_sys'
+gem 'rubocop-rails-omakase', require: false
+gem 'store_attribute'
+gem 'store_model'

@@ -1,0 +1,37 @@
+{
+  "peers": [
+    1,
+    2
+  ],
+  "description": "Independent peers preserve distinct keys and resolve one competing map key.",
+  "operations": {
+    "1": [
+      [
+        "document",
+        "set",
+        "left",
+        1
+      ],
+      [
+        "document",
+        "set",
+        "title",
+        "alpha"
+      ]
+    ],
+    "2": [
+      [
+        "document",
+        "set",
+        "right",
+        2
+      ],
+      [
+        "document",
+        "set",
+        "title",
+        "beta"
+      ]
+    ]
+  }
+}

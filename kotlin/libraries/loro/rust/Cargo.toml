@@ -1,0 +1,20 @@
+[package]
+name = "loro-kotlin"
+version = "1.13.7"
+edition = "2021"
+publish = false
+
+[lib]
+name = "loro_kotlin"
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/uniffi-bindgen.rs"
+
+[dependencies]
+loro-ffi = { version = "=1.13.7" }
+uniffi = { version = "=0.31.1" }
+
+[features]
+cli = ["uniffi/cli"]

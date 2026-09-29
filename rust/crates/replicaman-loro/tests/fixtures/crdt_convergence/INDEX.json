@@ -1,0 +1,69 @@
+{
+  "cases": {
+    "concurrent_same_key_create": {
+      "base.bin": "1334b46b8dd64371aaf0e0d8de20177671a8a284cfc01de1777b59acbca92950",
+      "expected.json": "5027e46801d54863a12d2028b89cfe247b857140c7e5ed52d0be85ea6aee9c23",
+      "left.bin": "5e7fe67a1982df25c909a7fe06f29b7ad5b20b8a237fc6bf7e29f491db80ce58",
+      "manifest.json": "bd52d73144b598e66cf634fafc6a8f487c8e64de032f5a3530544e220d982a0f",
+      "right.bin": "a0e84b5877b2f85e0baffb2d35fbed2b5c98b5b3c7e4fa2ee3eee3860189ca46"
+    },
+    "delete_vs_edit": {
+      "base.bin": "1334b46b8dd64371aaf0e0d8de20177671a8a284cfc01de1777b59acbca92950",
+      "expected.json": "33a9658db61518485f86d72e4da0b802ebb1be6b4913fa1e14d41702322dc47d",
+      "left.bin": "7b65acf84b971dacc40ab4a999f1afb2bde17393f3a7c50526e6a8ff5b484549",
+      "manifest.json": "5ae28f57e88ef6270b712389eefbdd19861471da55331bb91fc7b6749e9d7c14",
+      "right.bin": "d0be9bbe79008e8d11ce3325c2372b61a26328a5139f4911618c062736924642"
+    },
+    "field_wise_merge": {
+      "base.bin": "1334b46b8dd64371aaf0e0d8de20177671a8a284cfc01de1777b59acbca92950",
+      "expected.json": "1bdb2ac1ee29cdbb4200359b95fa8d2f5282c464e8b7082072e79184df601b2c",
+      "left.bin": "f73a83c5e4fe9f3f79c72ff8b211200292d5ad692b78014d8bc278e1bcbee8c5",
+      "manifest.json": "9b7ac641ce3bcfa4d2814e4fefb78ca9ce5ee314f2950e874ca4ba450d682b5e",
+      "right.bin": "75042569dc866f0d309b953f657b972ab84b6188dc8d20094d52da12ce99db12"
+    },
+    "meta_name_lww": {
+      "base.bin": "1334b46b8dd64371aaf0e0d8de20177671a8a284cfc01de1777b59acbca92950",
+      "expected.json": "b64f5a2f90bed2474e87987a93b4f0452466a4ff4648b9ab85b1b8ca9225c17c",
+      "left.bin": "43814e8fc2f5cf8dd0c10b8496a879d59d8dfb508f07ce4efae5ea57c9e59ec8",
+      "manifest.json": "775d0d03c708690cb958459528a885ee0f0eb8aba54d72dc0de901672d86ece6",
+      "right.bin": "0fe84f53f1a029a748af4ff8b47608cf44833954ff4f8c39066006f83b401b31"
+    },
+    "numeric_fields_lww": {
+      "base.bin": "1334b46b8dd64371aaf0e0d8de20177671a8a284cfc01de1777b59acbca92950",
+      "expected.json": "0d812135c58ea88f7db3e14d0e2b755be29288e8f2b11ff47ce57337556449e6",
+      "left.bin": "b9404b3db0cc2878f0327a6d696f228437998d825028712a4d0071603d9a8a4d",
+      "manifest.json": "a30dc3537b7c7c2d6ac9659f4abf5f4a319c65dfa9053e31045c89efeef05cb0",
+      "right.bin": "b5b0a33d1c78acd226f4f0615f99f8c087d9ef6811a6a422cde1000ed280a9d1"
+    },
+    "same_field_lww": {
+      "base.bin": "1334b46b8dd64371aaf0e0d8de20177671a8a284cfc01de1777b59acbca92950",
+      "expected.json": "8aebdecdab72c15057d9732dc19aa16f324720b333509b628ea0f5d1364f18e2",
+      "left.bin": "f73a83c5e4fe9f3f79c72ff8b211200292d5ad692b78014d8bc278e1bcbee8c5",
+      "manifest.json": "6dde391755abd1d3eb48dcc132152ee582872a56619484677059607e73724735",
+      "right.bin": "1921264e2cb819190c4dc807bad95f21573d5627a8f651bf05af56d4c6f55f86"
+    },
+    "settings_field_wise": {
+      "base.bin": "1334b46b8dd64371aaf0e0d8de20177671a8a284cfc01de1777b59acbca92950",
+      "expected.json": "340eddc3103ae173035df1db4a2b8379a2a0d7e4702e86ba627faca2e4298abe",
+      "left.bin": "97ca29b4e7fe614b8c63fee1ceacd518535e0a8425a20bf989d7a725ceaf8461",
+      "manifest.json": "39f350611f6902eb24826b5a7d1640f2fbb2825fa9d5e672a57016576f518dde",
+      "right.bin": "a118363e41a54e7ac81172a629e2d567180d6a8d9116427592f98db089747604"
+    },
+    "sub_object_replace_whole": {
+      "base.bin": "1334b46b8dd64371aaf0e0d8de20177671a8a284cfc01de1777b59acbca92950",
+      "expected.json": "27795241b34e8ab2a57ac3f7ec178447910acbd5a5f64cd6e4cb3469c87cb358",
+      "left.bin": "b3b7c95b59cafc315b29deb466c456727b4c57b2b043ace5b6dbc55e6dc205c2",
+      "manifest.json": "8e081eec4c8c5aa7060d64c04284bcfcf09cd3802d0f6f3593717f0fbd17f8ec",
+      "right.bin": "f32b894d093d3ddab9c8619f5f37186123d65401542f260d3926a2952519cbd1"
+    },
+    "unknown_fields_roundtrip": {
+      "base.bin": "1334b46b8dd64371aaf0e0d8de20177671a8a284cfc01de1777b59acbca92950",
+      "expected.json": "1b25b67d2fdcbc98d1b264ff244b40fad1dfbde7f83fc24eecc14ee760f34b56",
+      "left.bin": "91e79d8313e71a54285ce55546e3bb1120d60fe160da26f33d47500200072a5f",
+      "manifest.json": "24991bed7ea45e50ed1b182b66ecb2f3c5635a88206631eb0d2f93c5ab9a153c",
+      "right.bin": "b5b0a33d1c78acd226f4f0615f99f8c087d9ef6811a6a422cde1000ed280a9d1"
+    }
+  },
+  "note": "Frozen manifest of the cross-platform merge corpus, written with its verbatim copies by tools/generate_crdt_corpus.rb; this index pins WHICH cases and WHICH bytes a client is grading, so a partial re-copy or an uncopied new case fails instead of passing quietly.",
+  "source": "protocol/fixtures/crdt_convergence"
+}

@@ -1,0 +1,7 @@
+[
+  "board_defaults.rs",
+  "board_document.rs",
+  "deck_defaults.rs",
+  "deck_document.rs",
+  "mod.rs"
+]

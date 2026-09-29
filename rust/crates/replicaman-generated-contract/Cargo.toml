@@ -1,0 +1,10 @@
+[package]
+name = "replicaman-generated-contract"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+replicaman = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { workspace = true }

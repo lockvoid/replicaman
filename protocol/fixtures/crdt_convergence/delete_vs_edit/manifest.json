@@ -1,0 +1,11 @@
+{
+  "name": "delete_vs_edit",
+  "description": "One device deletes a card while another edits it. The delete wins.",
+  "blobs": [
+    "base.bin",
+    "left.bin",
+    "right.bin"
+  ],
+  "left_peer": 11,
+  "right_peer": 22
+}

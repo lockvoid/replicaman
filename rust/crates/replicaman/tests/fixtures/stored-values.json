@@ -1,0 +1,73 @@
+[
+  {
+    "name": "empty object",
+    "json": "{}",
+    "valid": true
+  },
+  {
+    "name": "Unicode, null and future fields",
+    "json": "{\"title\": \"дача 🎬\", \"future\": {\"tags\": [null, true, 0.25, \"a\\u0000b\"]}}",
+    "valid": true
+  },
+  {
+    "name": "signed integer boundaries",
+    "json": "{\"safe\": 9007199254740991, \"big\": 9007199254740993, \"max\": 9223372036854775807, \"min\": -9223372036854775808}",
+    "valid": true,
+    "integers": {
+      "safe": "9007199254740991",
+      "big": "9007199254740993",
+      "max": "9223372036854775807",
+      "min": "-9223372036854775808"
+    }
+  },
+  {
+    "name": "empty bytes",
+    "json": "",
+    "valid": false
+  },
+  {
+    "name": "truncated object",
+    "json": "{\"title\":",
+    "valid": false
+  },
+  {
+    "name": "trailing bytes",
+    "json": "{\"title\":1}x",
+    "valid": false
+  },
+  {
+    "name": "null is not a row",
+    "json": "null",
+    "valid": false
+  },
+  {
+    "name": "array is not a row",
+    "json": "[]",
+    "valid": false
+  },
+  {
+    "name": "scalar is not a row",
+    "json": "42",
+    "valid": false
+  },
+  {
+    "name": "nested future data",
+    "json": "{\"o\":{\"a\":{\"b\":{\"c\":[1,[2,[3]]]}}},\"arr\":[{\"k\":\"v\"},{\"k\":null}],\"empty\":[]}",
+    "valid": true
+  },
+  {
+    "name": "finite binary64",
+    "json": "{\"tiny\":1e-7,\"negativeZero\":-0.0,\"large\":1e300,\"fraction\":0.1}",
+    "valid": true
+  },
+  {
+    "name": "trailing comma",
+    "json": "{\"value\":1,}",
+    "valid": false
+  },
+  {
+    "name": "nonfinite number",
+    "json": "{\"value\":NaN}",
+    "valid": false
+  }
+]

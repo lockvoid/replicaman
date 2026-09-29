@@ -1,0 +1,93 @@
+[tools]
+ruby = "4.0.5"
+java = "zulu-17"
+
+[tasks."build:loro-kotlin"]
+description = "Build the host Loro library the Kotlin tests load"
+dir = "{{config_root}}/kotlin"
+run = "./gradlew :loro:loroHostLibrary --console=plain"
+
+[tasks."test:codegen"]
+description = "Generator tests, committed generator outputs, embedded schemas, packaging contract"
+dir = "{{config_root}}"
+run = [
+  "ruby codegen/tests/compiler_test.rb",
+  "ruby tools/generate_fixtures.rb --check",
+  "ruby tools/storage_schema.rb --check",
+  "ruby tools/package.rb --check",
+]
+
+[tasks."test:swift"]
+dir = "{{config_root}}/swift"
+run = "swift test --parallel"
+
+[tasks."test:kotlin"]
+dir = "{{config_root}}/kotlin"
+run = "./gradlew :replicaman:test :replicaman-loro:test :loro:test --rerun-tasks --console=plain"
+
+[tasks."test:rust"]
+dir = "{{config_root}}/rust"
+run = [
+  "cargo test --workspace --all-features --locked",
+  "cargo check -p replicaman --locked",
+]
+
+[tasks."test:rails"]
+dir = "{{config_root}}/ruby"
+run = "bin/test"
+
+[tasks."test:loro-ruby"]
+dir = "{{config_root}}/ruby/vendor/loro"
+run = "bundle exec rake test"
+
+[tasks.test]
+description = "Every suite, one at a time"
+run = [
+  "mise run test:codegen",
+  "mise run test:swift",
+  "mise run test:kotlin",
+  "mise run test:rust",
+  "mise run test:rails",
+  "mise run test:loro-ruby",
+]
+
+[tasks."e2e:workers"]
+description = "Build the three native E2E workers"
+dir = "{{config_root}}"
+run = [
+  "cd swift && swift build --product ReplicaManE2EWorker",
+  "cd kotlin && ./gradlew :e2e-worker:installDist --console=plain",
+  "cd rust && cargo build -p replicaman-e2e-worker --locked",
+]
+
+[tasks.e2e]
+description = "Real multi-client histories against a disposable Rails server"
+dir = "{{config_root}}"
+depends = ["e2e:workers"]
+env = { BUNDLE_GEMFILE = "{{config_root}}/ruby/Gemfile" }
+run = [
+  "bundle exec ruby e2e/e2e.rb",
+  "bundle exec ruby e2e/protocol_e2e.rb",
+  "bundle exec ruby e2e/restore_e2e.rb",
+  "bundle exec ruby e2e/lifecycle_e2e.rb",
+  "bundle exec ruby e2e/checkpoint_load.rb --rows 1000,10000 --command-timeout 45",
+]
+
+[tasks."e2e:load"]
+description = "Native authoring load and the full 100k pull probe"
+dir = "{{config_root}}"
+depends = ["e2e:workers"]
+env = { BUNDLE_GEMFILE = "{{config_root}}/ruby/Gemfile" }
+run = [
+  "bundle exec ruby e2e/load.rb",
+  "bundle exec ruby e2e/checkpoint_load.rb",
+]
+
+[tasks.examples]
+description = "Run the notes example in every language"
+dir = "{{config_root}}"
+run = [
+  "cd swift && swift run ReplicaManNotesExample",
+  "cd kotlin && ./gradlew :notes-example:run --console=plain",
+  "cd rust && cargo run -p replicaman-notes-example --locked",
+]

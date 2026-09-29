@@ -1,0 +1,35 @@
+[package]
+name = "replicaman"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Durable local replicas and synchronization for Rails-backed applications"
+readme = "README.md"
+
+[features]
+test-support = ["dep:tokio"]
+
+[dependencies]
+base64 = "0.22"
+event-listener = "5.4"
+flate2 = "1.1"
+futures = "0.3.31"
+futures-timer = "3.0"
+httpdate = "1.0.3"
+log = "0.4"
+parking_lot = "0.12.4"
+rand = "0.9"
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+sha2 = "0.10.9"
+tokio = { workspace = true, optional = true, features = ["rt"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "replicaman-loro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Loro document codec for ReplicaMan"
+
+[dependencies]
+loro = { workspace = true }
+replicaman = { workspace = true }
+
+[dev-dependencies]
+futures = "0.3.31"
+replicaman = { workspace = true, features = ["test-support"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
+
+[lints]
+workspace = true

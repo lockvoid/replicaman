@@ -1,0 +1,83 @@
+[
+  {
+    "name": "ordinary birth",
+    "valid": true,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{}}"
+  },
+  {
+    "name": "explicit rebirth",
+    "valid": true,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"replaces\":\"previous\"}"
+  },
+  {
+    "name": "bound parent",
+    "valid": true,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"references\":[{\"name\":\"parent\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"}]}"
+  },
+  {
+    "name": "reference limit",
+    "valid": true,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"references\":[{\"name\":\"parent0\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent1\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent2\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent3\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent4\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent5\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent6\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent7\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent8\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent9\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent10\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent11\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent12\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent13\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent14\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent15\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent16\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent17\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent18\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent19\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent20\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent21\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent22\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent23\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent24\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent25\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent26\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent27\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent28\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent29\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent30\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent31\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent32\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent33\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent34\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent35\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent36\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent37\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent38\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent39\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent40\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent41\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent42\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent43\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent44\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent45\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent46\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent47\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent48\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent49\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent50\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent51\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent52\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent53\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent54\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent55\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent56\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent57\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent58\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent59\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent60\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent61\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent62\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent63\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"}]}"
+  },
+  {
+    "name": "too many references",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"references\":[{\"name\":\"parent0\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent1\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent2\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent3\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent4\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent5\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent6\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent7\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent8\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent9\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent10\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent11\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent12\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent13\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent14\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent15\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent16\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent17\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent18\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent19\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent20\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent21\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent22\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent23\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent24\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent25\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent26\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent27\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent28\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent29\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent30\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent31\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent32\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent33\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent34\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent35\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent36\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent37\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent38\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent39\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent40\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent41\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent42\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent43\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent44\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent45\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent46\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent47\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent48\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent49\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent50\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent51\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent52\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent53\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent54\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent55\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent56\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent57\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent58\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent59\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent60\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent61\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent62\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent63\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent64\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"}]}"
+  },
+  {
+    "name": "duplicate reference names",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"references\":[{\"name\":\"parent\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"},{\"name\":\"parent\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"}]}"
+  },
+  {
+    "name": "empty reference name",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"references\":[{\"name\":\"\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"}]}"
+  },
+  {
+    "name": "empty reference stream",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"references\":[{\"name\":\"parent\",\"stream\":\"\",\"id\":\"b1\",\"incarnation\":\"parent-birth\"}]}"
+  },
+  {
+    "name": "empty reference id",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"references\":[{\"name\":\"parent\",\"stream\":\"boards\",\"id\":\"\",\"incarnation\":\"parent-birth\"}]}"
+  },
+  {
+    "name": "empty reference incarnation",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"references\":[{\"name\":\"parent\",\"stream\":\"boards\",\"id\":\"b1\",\"incarnation\":\"\"}]}"
+  },
+  {
+    "name": "empty incarnation",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"\",\"data\":{}}"
+  },
+  {
+    "name": "empty replaces",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"row.create\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"replaces\":\"\"}"
+  },
+  {
+    "name": "replacement on row.patch",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"row.patch\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"codec\":\"loro@1\",\"payload\":\"AQ==\",\"replaces\":\"old\"}"
+  },
+  {
+    "name": "replacement on row.delete",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"row.delete\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"codec\":\"loro@1\",\"payload\":\"AQ==\",\"replaces\":\"old\"}"
+  },
+  {
+    "name": "replacement on doc.delta",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"doc.delta\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"codec\":\"loro@1\",\"payload\":\"AQ==\",\"replaces\":\"old\"}"
+  },
+  {
+    "name": "noncanonical document bytes",
+    "valid": false,
+    "op": "{\"id\":\"op1\",\"op\":\"doc.delta\",\"stream\":\"notes\",\"row_id\":\"n1\",\"incarnation\":\"born\",\"data\":{},\"codec\":\"loro@1\",\"payload\":\"AR==\"}"
+  }
+]
+

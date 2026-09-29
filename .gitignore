@@ -1,0 +1,24 @@
+.DS_Store
+.build/
+.swiftpm/
+build/
+.gradle/
+target/
+.bundle/
+vendor/bundle/
+*.gem
+*.dylib
+*.so
+*.dll
+*.bundle
+*.xcresult/
+tmp/
+log/
+coverage/
+node_modules/
+local.properties
+
+.kotlin/
+
+# Generated, assembled by tools/dependencies.rb before binary packaging.
+kotlin/libraries/loro-android/src/main/resources/META-INF/replicaman*/

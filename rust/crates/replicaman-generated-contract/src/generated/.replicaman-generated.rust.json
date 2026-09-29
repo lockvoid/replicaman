@@ -1,0 +1,14 @@
+[
+  "board.rs",
+  "deck.rs",
+  "export.rs",
+  "item.rs",
+  "item_template.rs",
+  "job.rs",
+  "mod.rs",
+  "sample_replica.rs",
+  "tally.rs",
+  "theme.rs",
+  "ticket.rs",
+  "workflow.rs"
+]

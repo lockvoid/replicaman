@@ -1,0 +1,4 @@
+/ext/loro_rb/target/
+/lib/loro/*.bundle
+/lib/loro/*.so
+/tmp/
