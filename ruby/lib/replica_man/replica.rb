@@ -191,6 +191,7 @@ module ReplicaMan
           "SELECT relkind FROM pg_class WHERE relname = 'replica_man_snapshots'"
         ) == 'p'
 
+        streams.each_value(&:validate_schema!)
         connection.transaction do
           connection.execute("SELECT pg_advisory_xact_lock(#{PARTITION_LOCK})")
           streams.each_key do |name|

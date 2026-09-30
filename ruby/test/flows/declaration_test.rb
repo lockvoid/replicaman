@@ -120,21 +120,21 @@ class DeclarationTest < ActiveSupport::TestCase
   test 'a declared name matching neither column nor store key fails the boot' do
     bogus = misdeclared { attribute :nonsense }
 
-    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate_schema! }
     assert_match(/declares unknown attribute: nonsense/, error.message)
   end
 
   test 'a scalar column refuses a declared type — introspection owns it' do
     bogus = misdeclared { attribute :rank, :string }
 
-    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate_schema! }
     assert_match(/column type is introspected/, error.message)
   end
 
   test 'a typed store key refuses a declared type — introspection owns it' do
     bogus = misdeclared { attribute :label, :string }
 
-    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate_schema! }
     assert_match(/typed store key is introspected/, error.message)
   end
 
@@ -146,13 +146,13 @@ class DeclarationTest < ActiveSupport::TestCase
       attribute :payload, :json
     end
 
-    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate_schema! }
     assert_match(/shape source/, error.message)
   end
 
   test 'a columnless attribute requires a pull direction' do
     undirected = misdeclared { attribute :ghost, :string }
-    error = assert_raises(ReplicaMan::Stream::Invalid) { undirected.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { undirected.validate_schema! }
     assert_match(/declare pull: false \(intake\) or a pull lambda/, error.message)
   end
 
@@ -209,7 +209,7 @@ class DeclarationTest < ActiveSupport::TestCase
       end
     end
 
-    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate_schema! }
     assert_match(/document attribute :nonsense is not an attribute of Board/, error.message)
   end
 
@@ -228,14 +228,14 @@ class DeclarationTest < ActiveSupport::TestCase
   test 'the identity column takes no type and no directions' do
     bogus = misdeclared { attribute :id, push: false }
 
-    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate_schema! }
     assert_match(/identity rides the op envelope/, error.message)
   end
 
   test 'the STI discriminator is never declared — it rides op.type' do
     bogus = misdeclared { attribute :type, :string, pull: false }
 
-    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate_schema! }
     assert_match(/STI discriminator rides op.type/, error.message)
   end
 
@@ -302,11 +302,11 @@ class DeclarationTest < ActiveSupport::TestCase
   test 'an index names a pulled base attribute — declare the attribute first' do
     bogus = misdeclared { index :ghost }
 
-    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate_schema! }
     assert_match(/index :ghost .*declare the attribute first/, error.message)
 
     intake = misdeclared { attribute :annotation, :string, pull: false; index :annotation }
-    error = assert_raises(ReplicaMan::Stream::Invalid) { intake.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { intake.validate_schema! }
     assert_match(/index :annotation .*declare the attribute first/, error.message,
                  'an intake attribute is never stored, so nothing exists to index')
   end
@@ -325,54 +325,64 @@ class DeclarationTest < ActiveSupport::TestCase
       index :tags, kind: :fts5
     end
 
-    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate! }
+    error = assert_raises(ReplicaMan::Stream::Invalid) { bogus.validate_schema! }
     assert_match(/index :tags \(fts5\).*cannot be indexed/, error.message)
   end
 
-  test 'an unavailable configured database propagates the connection error' do
+  test 'declaring a stream reads no database; the schema check propagates an unavailable one' do
     indexed = Class.new(ReplicaMan::Stream) do
       def self.stream_name
         'jobs'
       end
+      owner :user_id
       attribute :rank
       index :rank
     end
     refused = proc { raise ActiveRecord::ConnectionNotEstablished, 'connection to server at "127.0.0.1", port 5432 failed' }
-    Job.define_singleton_method(:table_exists?, &refused)
-    Job.define_singleton_method(:primary_key, &refused)
+    %i[table_exists? columns_hash primary_key].each { Job.define_singleton_method(it, &refused) }
 
-    assert_raises(ActiveRecord::ConnectionNotEstablished) { indexed.validate! }
+    assert_nothing_raised { indexed.validate! }
+    assert_raises(ActiveRecord::ConnectionNotEstablished) { indexed.validate_schema! }
   ensure
-    Job.singleton_class.send(:remove_method, :table_exists?)
-    Job.singleton_class.send(:remove_method, :primary_key)
+    %i[table_exists? columns_hash primary_key].each { Job.singleton_class.send(:remove_method, it) }
   end
 
-  test 'a boot whose schema is behind its migrations defers the schema-bound checks to the migrated boot' do
+  test 'install! checks the declarations against the migrated schema before it installs anything' do
+    error = assert_raises(ReplicaMan::Stream::Invalid) { with_unknown_attribute { DummyReplica.install! } }
+    assert_match(/declares unknown attribute: nonsense/, error.message)
+  end
+
+  test 'the manifest checks the declarations against the migrated schema' do
+    error = assert_raises(ReplicaMan::Stream::Invalid) { with_unknown_attribute { ReplicaMan::Manifest.new(DummyReplica).to_h } }
+    assert_match(/declares unknown attribute: nonsense/, error.message)
+  end
+
+  test 'the schema check refuses an attribute the migrated schema does not have' do
     ahead = Class.new(ReplicaMan::Stream) do
+      def self.stream_name
+        'jobs'
+      end
+      attribute :added_by_the_pending_migration
+    end
+
+    error = assert_raises(ReplicaMan::Stream::Invalid) { ahead.validate_schema! }
+    assert_match(/unknown attribute: added_by_the_pending_migration/, error.message)
+  end
+
+  private
+
+  def with_unknown_attribute
+    bogus = Class.new(ReplicaMan::Stream) do
       def self.stream_name
         'jobs'
       end
       owner :user_id
-      attribute :added_by_the_pending_migration
+      attribute :nonsense
     end
-    context = Job.connection_pool.migration_context
-    context.define_singleton_method(:needs_migration?) { true }
-    Job.connection_pool.define_singleton_method(:migration_context) { context }
-
-    assert_nothing_raised { ahead.validate! }
+    streams = DummyReplica.streams
+    DummyReplica.define_singleton_method(:streams) { streams.merge(jobs: bogus) }
+    yield
   ensure
-    Job.connection_pool.singleton_class.send(:remove_method, :migration_context)
-  end
-
-  test 'a migrated boot still refuses an attribute the schema does not have' do
-    ahead = Class.new(ReplicaMan::Stream) do
-      def self.stream_name
-        'jobs'
-      end
-      attribute :added_by_the_pending_migration
-    end
-
-    error = assert_raises(ReplicaMan::Stream::Invalid) { ahead.validate! }
-    assert_match(/unknown attribute: added_by_the_pending_migration/, error.message)
+    DummyReplica.singleton_class.send(:remove_method, :streams)
   end
 end

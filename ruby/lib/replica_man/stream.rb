@@ -303,15 +303,18 @@ module ReplicaMan
         if document? && document_declarations.empty?
           raise Invalid, "stream '#{stream_name}': a document door needs its document declared — document do … end"
         end
-        if introspectable?
-          projection_dependencies.each { it.validate!(self) }
-          validate_index_targets!
-          validate_document!
-          validate_declarations!(model, base_declarations)
-          variant_declarations.each { |klass, declarations| validate_declarations!(klass, declarations) }
-          validate_index_types!
-        end
         raise Invalid, "stream '#{stream_name}' declares no owner" if owner.nil?
+      end
+
+      # The declarations against the migrated schema. install! and the manifest run it; loading the
+      # application never touches the database.
+      def validate_schema!
+        projection_dependencies.each { it.validate!(self) }
+        validate_index_targets!
+        validate_document!
+        validate_declarations!(model, base_declarations)
+        variant_declarations.each { |klass, declarations| validate_declarations!(klass, declarations) }
+        validate_index_types!
       end
 
       def validate_document!

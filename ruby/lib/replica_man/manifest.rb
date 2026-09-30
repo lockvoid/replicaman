@@ -11,6 +11,7 @@ module ReplicaMan
     def to_h
       eager_load!
       refuse_stale_schema!
+      @replica.streams.each_value(&:validate_schema!)
 
       { version: 1, namespace: @replica.namespace, schemaVersion: @replica.schema_version, streams: streams }
     end
