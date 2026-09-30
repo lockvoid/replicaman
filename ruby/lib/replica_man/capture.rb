@@ -1,5 +1,7 @@
 module ReplicaMan
   class Capture
+    UNCLAIMED = -1
+
     class << self
       def install(stream)
         registry[[stream.replica.namespace, stream.stream_name]] = stream
@@ -234,10 +236,35 @@ module ReplicaMan
         authorize!(entry)
         return false if unchanged?(entry, previous, address)
 
-        position = entry.fetch(:bucket) && Buckets.advance(entry.fetch(:replica).namespace, entry.fetch(:bucket))
-        write(entry, position)
-        Delta.where(address).where(position: nil).update_all(position: position) if entry.fetch(:document) && position
+        write(entry, entry.fetch(:bucket) && UNCLAIMED)
+        claim_at_commit if entry.fetch(:bucket)
         true
+      end
+
+      def claim_at_commit
+        transaction = Snapshot.connection.current_transaction
+        return if ActiveSupport::IsolatedExecutionState[:replica_man_claiming].equal?(transaction)
+
+        ActiveSupport::IsolatedExecutionState[:replica_man_claiming] = transaction
+        transaction.before_commit { claim_positions }
+      end
+
+      def claim_positions
+        unclaimed = Snapshot.connection.select_rows(<<~SQL, 'ReplicaMan unclaimed')
+          SELECT namespace, bucket, stream, row_id FROM replica_man_snapshots
+          WHERE position = #{UNCLAIMED} ORDER BY namespace, bucket, revision
+        SQL
+        positions = Buckets.claim(unclaimed.map { it.first(2) })
+        unclaimed.zip(positions).each { |(namespace, _, stream, row_id), position| stamp(namespace, stream, row_id, position) }
+      end
+
+      def stamp(namespace, stream, row_id, position)
+        Snapshot.connection.exec_update(<<~SQL, 'ReplicaMan claim', [namespace, stream, row_id, position])
+          UPDATE replica_man_snapshots SET position = $4,
+            document_position = CASE WHEN document_position = #{UNCLAIMED} THEN $4 ELSE document_position END
+          WHERE namespace = $1 AND stream = $2 AND row_id = $3
+        SQL
+        Delta.where(namespace: namespace, stream: stream, row_id: row_id, position: nil).update_all(position: position)
       end
 
       def address(entry)

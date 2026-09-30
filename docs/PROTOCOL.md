@@ -43,9 +43,11 @@ UTF-8 strings of 1 to 1,024 bytes without NUL. Errors answer
 ## Buckets and cursors
 
 The server captures every synchronized row into one bucket: `<shard>:<owner>`, or
-`<shard>:*` for rows of a stream's declared shared owner. Each capture advances the
-bucket's position counter; the counter row stays locked until the capturing
-transaction commits, so positions become visible in commit order without gaps.
+`<shard>:*` for rows of a stream's declared shared owner. A transaction claims the
+positions of all its captures at once, as its last act before COMMIT, taking the
+bucket counters in one order; a counter row stays locked until that commit, so
+positions become visible in commit order without gaps, and a transaction holding a
+counter never waits on a row.
 A row lives in the bucket it was born in: a write that would change its owner is
 refused.
 

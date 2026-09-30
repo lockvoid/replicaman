@@ -8,6 +8,7 @@ class CreateReplicaManTables < ActiveRecord::Migration[8.1]
     create_deltas
     create_partition_defaults
     create_revision_trigger
+    create_claim_guard
     create_buckets
     create_operations
     create_changes
@@ -43,6 +44,7 @@ class CreateReplicaManTables < ActiveRecord::Migration[8.1]
       t.check_constraint "incarnation ~ #{IDENTIFIER}", name: 'replica_man_snapshot_incarnation'
       t.check_constraint 'octet_length(row_id) BETWEEN 1 AND 1024', name: 'replica_man_snapshot_row_id'
       t.check_constraint '(bucket IS NULL) = (position IS NULL)', name: 'replica_man_snapshot_bucket_position'
+      t.check_constraint 'position = -1 OR position > 0', name: 'replica_man_snapshot_position'
       t.check_constraint 'document IS NULL OR codec IS NOT NULL', name: 'replica_man_snapshot_document_codec'
       t.check_constraint 'document_position IS NULL OR document IS NOT NULL OR deleted_at IS NOT NULL',
                          name: 'replica_man_snapshot_document_position'
@@ -51,6 +53,7 @@ class CreateReplicaManTables < ActiveRecord::Migration[8.1]
 
       t.index [:namespace, :bucket, :position], name: 'replica_man_snapshot_positions'
       t.index [:namespace, :bucket, :position], name: 'replica_man_snapshot_live_positions', where: 'deleted_at IS NULL'
+      t.index [:namespace, :bucket, :revision], name: 'replica_man_snapshot_unclaimed', where: 'position = -1'
       t.index [:namespace, :stream, :row_id, :deleted_at], name: 'replica_man_snapshot_garbage',
                                                          where: "deleted_at IS NOT NULL AND (data <> '{}'::jsonb OR document IS NOT NULL)"
     end
@@ -91,6 +94,22 @@ class CreateReplicaManTables < ActiveRecord::Migration[8.1]
       $$;
       CREATE TRIGGER replica_man_revision BEFORE INSERT OR UPDATE ON replica_man_snapshots
       FOR EACH ROW EXECUTE FUNCTION replica_man_stamp_revision();
+    SQL
+  end
+
+  def create_claim_guard
+    execute <<~SQL
+      CREATE FUNCTION replica_man_refuse_unclaimed() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM replica_man_snapshots
+                   WHERE namespace = NEW.namespace AND stream = NEW.stream AND row_id = NEW.row_id AND position = -1) THEN
+          RAISE EXCEPTION 'replica_man: %/% committed without a claimed position', NEW.stream, NEW.row_id;
+        END IF;
+        RETURN NULL;
+      END;
+      $$;
+      CREATE CONSTRAINT TRIGGER replica_man_position_claimed AFTER INSERT OR UPDATE OF position ON replica_man_snapshots
+      DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.position = -1) EXECUTE FUNCTION replica_man_refuse_unclaimed();
     SQL
   end
 
