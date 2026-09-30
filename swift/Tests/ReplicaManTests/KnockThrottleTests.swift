@@ -13,8 +13,10 @@ final class KnockThrottleTests: XCTestCase {
         let store = try Fixture.store()
         let transport = StubTransport()
         let engine = Fixture.engine(store: store, transport: transport)
+        let starts = SyncStarts()
 
         let knocker = ReplicaKnocker(interval: 0.4) {
+            await starts.record()
             do {
                 _ = try await engine.pullUntilCaughtUp()
             } catch {}
@@ -35,13 +37,11 @@ final class KnockThrottleTests: XCTestCase {
             return after == before
         }
 
-        let shards = Fixture.schema().shards.count
-        let cycles = await transport.pullCount / shards
-        // ~0.2s of burst + trailing runs: one immediate cycle plus at most
-        // two throttled trailing ones is the ceiling; without the throttle
-        // this is 10+.
-        XCTAssertGreaterThanOrEqual(cycles, 1, "the doorbell still pulls")
-        XCTAssertLessThanOrEqual(cycles, 3, "one sync per window, not one per doorbell")
+        let gaps = await starts.gaps
+        XCTAssertGreaterThanOrEqual(gaps.count, 1, "the burst collapsed into a single sync; the trailing edge never ran")
+        for gap in gaps {
+            XCTAssertGreaterThanOrEqual(gap, .milliseconds(350), "one sync per window, not one per doorbell")
+        }
     }
 
     func testTrailingEdgeAlwaysDeliversTheLastDoorbell() async throws {
@@ -101,5 +101,17 @@ final class KnockThrottleTests: XCTestCase {
         await knocker.knock()
         try await Task.sleep(nanoseconds: 700_000_000)
         XCTAssertEqual(syncs.count, 2, "an ordinary doorbell is still throttled")
+    }
+}
+
+private actor SyncStarts {
+    private var instants: [ContinuousClock.Instant] = []
+
+    func record() {
+        instants.append(.now)
+    }
+
+    var gaps: [Duration] {
+        zip(instants, instants.dropFirst()).map { $1 - $0 }
     }
 }

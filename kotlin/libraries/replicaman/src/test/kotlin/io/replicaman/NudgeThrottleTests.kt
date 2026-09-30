@@ -15,6 +15,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /**
  * Amendment B — the doorbell throttle: during a render the signal rate is
@@ -32,7 +33,9 @@ class NudgeThrottleTests : ReplicaTestCase() {
         val engine = Fixture.engine(store = store, transport = transport)
 
         val failures = Recorder<Throwable>()
+        val starts = Recorder<TimeSource.Monotonic.ValueTimeMark>()
         val nudger = ReplicaNudger(400.milliseconds) {
+            starts.record(TimeSource.Monotonic.markNow())
             try {
                 engine.pullUntilCaughtUp()
             } catch (error: Throwable) {
@@ -54,13 +57,9 @@ class NudgeThrottleTests : ReplicaTestCase() {
         }
 
         assertTrue(failures.values.isEmpty(), "sync failed: ${failures.values}")
-        val shards = Fixture.schema().shards.size
-        val cycles = transport.pullCount() / shards
-        // ~0.2s of burst + trailing runs: one immediate cycle plus at most
-        // two throttled trailing ones is the ceiling; without the throttle
-        // this is 10+.
-        assertTrue(cycles >= 1, "the doorbell still pulls")
-        assertTrue(cycles <= 3, "one sync per window, not one per doorbell; saw $cycles")
+        val gaps = starts.values.zipWithNext { earlier, later -> later - earlier }
+        assertTrue(gaps.isNotEmpty(), "the burst collapsed into a single sync; the trailing edge never ran")
+        gaps.forEach { assertTrue(it >= 350.milliseconds, "one sync per window, not one per doorbell; saw a $it gap") }
     }
 
     /** KILL: drop `queued` — a doorbell inside the window is lost, not late. */

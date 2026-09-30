@@ -73,7 +73,7 @@ jobs:
         run: |
           rustup target add aarch64-linux-android
           cargo install cargo-ndk --version 4.1.2 --locked
-          sdkmanager 'platforms;android-37.2' 'ndk;28.2.13676358'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37.2' 'ndk;28.2.13676358'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
       - name: Build and verify native payload and AAR
         run: |

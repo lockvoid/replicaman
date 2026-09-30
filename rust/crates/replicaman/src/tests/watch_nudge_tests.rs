@@ -447,10 +447,13 @@ async fn rapid_nudges_cost_at_most_one_pull_per_window() {
     let store = store("nudge-throttle-burst");
     let transport = StubTransport::new();
     let engine = engine(store.clone(), transport.clone());
+    let starts = Arc::new(Mutex::new(Vec::<Instant>::new()));
 
     let nudger = ReplicaNudger::new(Duration::from_millis(400), Arc::new(TokioSpawner), {
         let engine = engine.clone();
+        let starts = starts.clone();
         move || {
+            starts.lock().push(Instant::now());
             let engine = engine.clone();
             Box::pin(async move {
                 let _ = engine.pull_until_caught_up(None).await;
@@ -481,15 +484,18 @@ async fn rapid_nudges_cost_at_most_one_pull_per_window() {
     )
     .await;
 
-    let shards = schema().shards().len();
-    let cycles = transport.pull_count() / shards;
-    // ~0.2 s of burst + trailing runs: one immediate cycle plus at most two
-    // throttled trailing ones is the ceiling; without the throttle this is 10+.
-    assert!(cycles >= 1, "the doorbell still pulls");
+    let starts = starts.lock().clone();
+    let gaps: Vec<Duration> = starts.windows(2).map(|pair| pair[1] - pair[0]).collect();
     assert!(
-        cycles <= 3,
-        "one sync per window, not one per doorbell (cycles={cycles})"
+        !gaps.is_empty(),
+        "the burst collapsed into a single sync; the trailing edge never ran"
     );
+    for gap in gaps {
+        assert!(
+            gap >= Duration::from_millis(350),
+            "one sync per window, not one per doorbell (gap={gap:?})"
+        );
+    }
 }
 
 /// A doorbell INSIDE the window must still produce a sync — late, never lost:
