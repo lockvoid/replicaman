@@ -34,6 +34,7 @@ module ReplicaMan
   autoload :Push
   autoload :Reconcile
   autoload :Replica
+  autoload :Schema
   autoload :Stream
 end
 

@@ -132,10 +132,11 @@ ruby ../replicaman/codegen/bin/replica-codegen --language swift \
 `GET /manifest` is disabled in production by default. The same generator supports
 Kotlin and Rust. Commit the manifest and generated output, and run `--check` in CI.
 
-`AppReplica.install!` creates a partition per stream and the change-capture
-triggers. It takes table locks: run it from the migration step (after
-`db:migrate` and before the schema dump), never on boot, and assert
-`AppReplica.uninstalled` is empty in a test.
+Migrations create each stream's partitions and change-capture triggers.
+After adding, changing or removing a stream, `bin/rails g replica_man:migration`
+writes the migration from the difference between the declarations and the
+migrated database. Keep `schema_format = :sql`, and assert in a test that
+`ReplicaMan::Schema::Plan.new([AppReplica]).changes` is empty.
 
 ```ruby
 ReplicaMan::Backfill.call(AppReplica)

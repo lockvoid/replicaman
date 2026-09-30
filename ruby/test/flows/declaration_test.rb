@@ -347,11 +347,6 @@ class DeclarationTest < ActiveSupport::TestCase
     %i[table_exists? columns_hash primary_key].each { Job.singleton_class.send(:remove_method, it) }
   end
 
-  test 'install! checks the declarations against the migrated schema before it installs anything' do
-    error = assert_raises(ReplicaMan::Stream::Invalid) { with_unknown_attribute { DummyReplica.install! } }
-    assert_match(/declares unknown attribute: nonsense/, error.message)
-  end
-
   test 'the manifest checks the declarations against the migrated schema' do
     error = assert_raises(ReplicaMan::Stream::Invalid) { with_unknown_attribute { ReplicaMan::Manifest.new(DummyReplica).to_h } }
     assert_match(/declares unknown attribute: nonsense/, error.message)

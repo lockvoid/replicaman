@@ -2,19 +2,13 @@ ENV['RAILS_ENV'] = 'test'
 
 require_relative './dummy/config/environment'
 
-begin
-  ActiveRecord::Base.connection.execute('SELECT 1')
-rescue ActiveRecord::NoDatabaseError
-  ActiveRecord::Tasks::DatabaseTasks.create_current
-end
-
+ActiveRecord::Tasks::DatabaseTasks.purge(ActiveRecord::Base.connection_db_config)
 ActiveRecord::Migration.verbose = false
 ActiveRecord::MigrationContext.new([File.expand_path('dummy/db/migrate', __dir__)]).migrate
 
-DummyReplica.install!
-
 require 'rails/test_help'
 require_relative 'support/domain_client'
+require_relative 'support/stream_migration'
 
 class ActiveSupport::TestCase
   self.use_transactional_tests = false

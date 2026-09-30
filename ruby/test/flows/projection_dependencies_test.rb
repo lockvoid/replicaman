@@ -7,7 +7,7 @@ class ProjectionDependenciesTest < ActiveSupport::TestCase
     Streams::Jobs.attribute :owner_name, :string, pull: ->(job) { job.user.name }
     Streams::Jobs.depends_on User, via: :user_id, fields: [:name]
     Streams::Jobs.instance_variable_set(:@resolved, nil)
-    ReplicaMan::CaptureHooks.install(DummyReplica)
+    migrate_streams!
     @user = User.create!(id: 'owner', name: 'Before')
     @job = Job.create!(id: 'job', user: @user, state: 'queued')
   end
@@ -16,7 +16,7 @@ class ProjectionDependenciesTest < ActiveSupport::TestCase
     Streams::Jobs.instance_variable_set(:@base_declarations, @declarations)
     Streams::Jobs.instance_variable_set(:@resolved, nil)
     Streams::Jobs.instance_variable_set(:@projection_dependencies, @dependencies)
-    ReplicaMan::CaptureHooks.install(DummyReplica)
+    migrate_streams!
   end
 
   def snapshot(id = @job.id)
@@ -68,7 +68,7 @@ class ProjectionDependenciesTest < ActiveSupport::TestCase
 
   test 'removing a declaration removes its database trigger' do
     Streams::Jobs.instance_variable_set(:@projection_dependencies, @dependencies)
-    ReplicaMan::CaptureHooks.install(DummyReplica)
+    migrate_streams!
     revision = snapshot.revision
     @user.update!(name: 'No longer a dependency')
     assert_equal revision, snapshot.revision

@@ -1,7 +1,5 @@
 module ReplicaMan
   class Replica
-    PARTITION_LOCK = 0x7265706c
-
     class << self
       attr_writer :serve_manifest
 
@@ -182,43 +180,6 @@ module ReplicaMan
         !(defined?(Rails.env) && Rails.env.production?)
       end
 
-      # Partitions and capture triggers take table locks: run this from the migration step, never on boot.
-      def install!
-        return unless Snapshot.table_exists?
-
-        connection = Snapshot.connection
-        return unless connection.select_value(
-          "SELECT relkind FROM pg_class WHERE relname = 'replica_man_snapshots'"
-        ) == 'p'
-
-        streams.each_value(&:validate_schema!)
-        connection.transaction do
-          connection.execute("SELECT pg_advisory_xact_lock(#{PARTITION_LOCK})")
-          streams.each_key do |name|
-            %w[replica_man_snapshots replica_man_deltas].each do |table|
-              carve(connection, table, name)
-            end
-          end
-
-          CaptureHooks.install(self)
-        end
-      end
-
-      # What install! would still create; empty once the database matches the declared streams.
-      def uninstalled
-        connection = Snapshot.connection
-        streams.values.flat_map do |stream|
-          partitions = %w[replica_man_snapshots replica_man_deltas].map { "#{it}_#{stream.stream_name}" }
-            .reject { connection.select_value("SELECT to_regclass(#{connection.quote(it)})::text") }
-          trigger = CaptureHooks.trigger_name(self, stream)
-          installed = connection.select_value(<<~SQL)
-            SELECT EXISTS (SELECT FROM pg_trigger WHERE tgname = #{connection.quote(trigger)}
-                           AND tgrelid = to_regclass(#{connection.quote(stream.model.table_name)}))
-          SQL
-          installed ? partitions : partitions + ["#{trigger} on #{stream.model.table_name}"]
-        end
-      end
-
       # Release old payloads in bounded batches. Entity identity is a permanent
       # fence within this dataset, so GC never makes a deleted address look new.
       def gc(window:, limit: 500)
@@ -246,32 +207,6 @@ module ReplicaMan
       end
 
       private
-
-      def carve(connection, table, name)
-        return if connection.select_value("SELECT to_regclass('#{table}_#{name}')::text")
-
-        stream = connection.quote(name.to_s)
-        attempts = 0
-        begin
-          attempts += 1
-          connection.transaction(requires_new: true) do
-            lagged = connection.select_value("SELECT EXISTS (SELECT FROM #{table}_default WHERE stream = #{stream})")
-            if lagged
-              connection.execute(<<~SQL)
-                CREATE TEMP TABLE #{table}_#{name}_carve ON COMMIT DROP AS
-                SELECT * FROM #{table}_default WHERE stream = #{stream}
-              SQL
-              connection.execute("DELETE FROM #{table}_default WHERE stream = #{stream}")
-            end
-            connection.execute("CREATE TABLE #{table}_#{name} PARTITION OF #{table} FOR VALUES IN (#{stream})")
-            connection.execute("INSERT INTO #{table} SELECT * FROM #{table}_#{name}_carve") if lagged
-          end
-        rescue ActiveRecord::CheckViolation
-          retry if attempts == 1
-
-          Rails.logger.warn("[replica_man] carve #{table}/#{name} lost the writer race twice — stream stays on the default partition until the next install")
-        end
-      end
 
       def pull_response(request, user)
         body = request.post? ? JSON.parse(RequestBody.read(request)) : request.params

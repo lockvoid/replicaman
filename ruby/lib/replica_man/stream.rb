@@ -306,8 +306,8 @@ module ReplicaMan
         raise Invalid, "stream '#{stream_name}' declares no owner" if owner.nil?
       end
 
-      # The declarations against the migrated schema. install! and the manifest run it; loading the
-      # application never touches the database.
+      # The declarations against the migrated schema. The migration generator and the manifest run it;
+      # loading the application never touches the database.
       def validate_schema!
         projection_dependencies.each { it.validate!(self) }
         validate_index_targets!

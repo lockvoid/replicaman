@@ -5,7 +5,6 @@ require_relative '../../ruby/test/dummy/config/environment'
 ActiveRecord::Migration.verbose = false
 ActiveRecord::MigrationContext.new([File.expand_path('../../ruby/test/dummy/db/migrate', __dir__)]).migrate
 Rails.application.eager_load!
-DummyReplica.install!
 unless ENV.fetch('REPLICAMAN_E2E_INITIALIZE', '1') == '0'
   User.create!(id: '42', name: 'First')
   User.create!(id: '43', name: 'Second')

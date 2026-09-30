@@ -1,0 +1,7 @@
+class <%= migration_class_name %> < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
+  def change
+<% @changes.each do |change| -%>
+    <%= change.to_ruby %>
+<% end -%>
+  end
+end

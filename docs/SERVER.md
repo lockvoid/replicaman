@@ -151,19 +151,24 @@ Commit the manifest and generate each client from it. The production manifest en
 
 ## Maintenance
 
-`install!` creates a partition per stream and the change-capture triggers. It takes table locks, so run it from the migration step, never on boot:
+Each stream needs a partition of the snapshot and delta tables, a change-capture trigger on its table, and a trigger per projection dependency. Migrations create them. After adding, changing or removing a stream, let the generator write the migration from the difference between the declarations and the migrated database:
 
-```ruby
-# lib/tasks/replica.rake
-task replica_install: :environment do
-  NotesReplica.install!
-end
-
-task 'db:schema:dump' => 'replica_install'
-Rake::Task['db:migrate'].enhance { Rake::Task['replica_install'].invoke }
+```sh
+bin/rails db:migrate
+bin/rails g replica_man:migration
+bin/rails db:migrate
 ```
 
-`NotesReplica.uninstalled` lists what `install!` would still create; assert it is empty in a test so the schema dump stays complete. Backfill existing rows before clients depend on them:
+```ruby
+class AddReplicaStreams < ActiveRecord::Migration[8.1]
+  def change
+    create_replica_partitions :notes
+    create_replica_capture :notes, namespace: 'notes', table: :notes, key: :id
+  end
+end
+```
+
+Every statement reverses. The objects live in `db/structure.sql`, so use `config.active_record.schema_format = :sql`. Assert in a test that `ReplicaMan::Schema::Plan.new([NotesReplica]).changes` is empty, so a forgotten migration fails the build. Backfill existing rows before clients depend on them:
 
 ```ruby
 ReplicaMan::Backfill.call(NotesReplica)
