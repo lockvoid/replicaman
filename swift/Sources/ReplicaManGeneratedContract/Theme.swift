@@ -144,4 +144,19 @@ public struct Theme: ReplicaWritableRowModel, ReplicaColumns, Equatable {
         encoded["pinned"] = pinned.map { value in .bool(value) } ?? .null
         return encoded
     }
+
+    public func encodeSnapshot() -> [String: ReplicaValue] {
+        var encoded: [String: ReplicaValue] = [:]
+        encoded["colors"] = ((try? ReplicaValueCoding.encode(colors)) ?? .null)
+        encoded["createdAt"] = .string(createdAt)
+        encoded["description"] = description.map { value in .string(value) } ?? .null
+        encoded["heading"] = heading.map { value in ((try? ReplicaValueCoding.encode(value)) ?? .null) } ?? .null
+        encoded["logoRef"] = logoRef.map { value in .string(value) } ?? .null
+        encoded["logoUrl"] = logoUrl.map { value in .string(value) } ?? .null
+        encoded["name"] = .string(name)
+        encoded["pinned"] = pinned.map { value in .bool(value) } ?? .null
+        encoded["updatedAt"] = .string(updatedAt)
+        encoded["userId"] = .signedInteger(Int64(userId))
+        return encoded
+    }
 }

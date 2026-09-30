@@ -921,7 +921,21 @@ impl ReplicaEngine {
         row_type: Option<&str>,
         data: &ReplicaFields,
     ) -> ReplicaResult<()> {
-        self.write_row(stream, id, row_type, data, RowWriteExpectation::Absent)
+        self.write_row(stream, id, row_type, data, None, RowWriteExpectation::Absent)
+            .await
+    }
+
+    /// A generated model's birth: the journal carries `data`, the local row
+    /// also keeps the required server-owned values `snapshot` supplies.
+    pub(crate) async fn create_model_row(
+        &self,
+        stream: &str,
+        id: &str,
+        row_type: Option<&str>,
+        data: &ReplicaFields,
+        snapshot: &ReplicaFields,
+    ) -> ReplicaResult<()> {
+        self.write_row(stream, id, row_type, data, Some(snapshot), RowWriteExpectation::Absent)
             .await
     }
 
@@ -933,7 +947,7 @@ impl ReplicaEngine {
         row_type: Option<&str>,
         data: &ReplicaFields,
     ) -> ReplicaResult<()> {
-        self.write_row(stream, id, row_type, data, RowWriteExpectation::Present)
+        self.write_row(stream, id, row_type, data, None, RowWriteExpectation::Present)
             .await
     }
 
@@ -946,7 +960,7 @@ impl ReplicaEngine {
         row_type: Option<&str>,
         data: &ReplicaFields,
     ) -> ReplicaResult<()> {
-        self.write_row(stream, id, row_type, data, RowWriteExpectation::Any)
+        self.write_row(stream, id, row_type, data, None, RowWriteExpectation::Any)
             .await
     }
 
@@ -956,6 +970,7 @@ impl ReplicaEngine {
         id: &str,
         row_type: Option<&str>,
         data: &ReplicaFields,
+        snapshot: Option<&ReplicaFields>,
         expectation: RowWriteExpectation,
     ) -> ReplicaResult<()> {
         let (store, _admitted) = self.admit_local_write().await?;
@@ -973,6 +988,7 @@ impl ReplicaEngine {
                 id,
                 row_type,
                 data,
+                snapshot,
                 expectation,
                 requested_lane,
             )
@@ -990,6 +1006,7 @@ impl ReplicaEngine {
         id: &str,
         row_type: Option<&str>,
         data: &ReplicaFields,
+        snapshot: Option<&ReplicaFields>,
         expectation: RowWriteExpectation,
         requested_lane: ReplicaLane,
     ) -> ReplicaResult<()> {
@@ -1073,7 +1090,11 @@ impl ReplicaEngine {
                 Some(&ReplicaPreimage::Absent.encoded()?),
                 requested_lane,
             )?;
-            store.upsert_snapshot(ctx, stream, id, &spec.shard, row_type, data)
+            // The journal carries only authored fields. The local birth keeps
+            // required server-owned values supplied by the generated model.
+            let mut birth = snapshot.cloned().unwrap_or_default();
+            birth.extend(data.iter().map(|(key, value)| (key.clone(), value.clone())));
+            store.upsert_snapshot(ctx, stream, id, &spec.shard, row_type, &birth)
         }
     }
 

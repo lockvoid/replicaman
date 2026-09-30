@@ -58,7 +58,7 @@ let package = Package(
         // the rows-only consumer proof.
         .testTarget(
             name: "ReplicaManTests",
-            dependencies: ["ReplicaMan", "ReplicaManTestProtocol"],
+            dependencies: ["ReplicaMan", "ReplicaManTestProtocol", "ReplicaManGeneratedContract"],
             resources: [.copy("Fixtures/manifest.json")]
         ),
         // Codec + document-lifecycle suite: the only tests that touch Loro.

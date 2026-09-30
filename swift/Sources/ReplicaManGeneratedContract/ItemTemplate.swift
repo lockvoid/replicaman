@@ -129,4 +129,21 @@ public enum ItemTemplate: ReplicaWritableRowModel, ReplicaColumns, Equatable {
         }
         return encoded
     }
+
+    public func encodeSnapshot() -> [String: ReplicaValue] {
+        var encoded: [String: ReplicaValue] = [:]
+        switch self {
+        case .photoItemTemplate(let model):
+            encoded["name"] = .string(model.name)
+            encoded["userId"] = .string(model.userId)
+            encoded["aspect"] = model.aspect.map { value in .string(value) } ?? .null
+            encoded["tone"] = model.tone.map { value in .string(value.rawValue) } ?? .null
+        case .textItemTemplate(let model):
+            encoded["name"] = .string(model.name)
+            encoded["userId"] = .string(model.userId)
+            encoded["body"] = model.body.map { value in .string(value) } ?? .null
+            encoded["tone"] = model.tone.map { value in .string(value.rawValue) } ?? .null
+        }
+        return encoded
+    }
 }

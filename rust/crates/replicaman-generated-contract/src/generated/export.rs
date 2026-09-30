@@ -367,4 +367,30 @@ impl ReplicaRowModel for Export {
     }
 }
 
-impl ReplicaWritableRowModel for Export {}
+impl ReplicaWritableRowModel for Export {
+    fn encode_snapshot(&self) -> ReplicaFields {
+        let mut encoded = ReplicaFields::new();
+        encoded.insert(
+            "details".to_owned(),
+            self.details
+                .as_ref()
+                .map_or(ReplicaValue::Null, |value| value.clone()),
+        );
+        encoded.insert(
+            "markers".to_owned(),
+            ReplicaValue::Array(
+                self.markers
+                    .iter()
+                    .map(|item| ReplicaValue::Number(*item))
+                    .collect(),
+            ),
+        );
+        encoded.insert("progress".to_owned(), ReplicaValue::Number(self.progress));
+        encoded.insert("result".to_owned(), self.result_json.clone());
+        encoded.insert(
+            "userId".to_owned(),
+            ReplicaValue::String(self.user_id.clone()),
+        );
+        encoded
+    }
+}

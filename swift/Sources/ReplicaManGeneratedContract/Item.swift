@@ -157,4 +157,26 @@ public enum Item: ReplicaWritableRowModel, ReplicaColumns, Equatable {
         }
         return encoded
     }
+
+    public func encodeSnapshot() -> [String: ReplicaValue] {
+        var encoded: [String: ReplicaValue] = [:]
+        switch self {
+        case .photoItem(let model):
+            encoded["annotation"] = model.annotation.map { value in .string(value) } ?? .null
+            encoded["boardId"] = .string(model.boardId)
+            encoded["label"] = model.label.map { value in .string(value.rawValue) } ?? .null
+            encoded["rank"] = .string(model.rank)
+            encoded["rankBadge"] = model.rankBadge.map { value in .string(value) } ?? .null
+            encoded["caption"] = model.caption.map { value in .string(value.rawValue) } ?? .null
+            encoded["width"] = model.width.map { value in .signedInteger(Int64(value)) } ?? .null
+        case .textItem(let model):
+            encoded["annotation"] = model.annotation.map { value in .string(value) } ?? .null
+            encoded["boardId"] = .string(model.boardId)
+            encoded["label"] = model.label.map { value in .string(value.rawValue) } ?? .null
+            encoded["rank"] = .string(model.rank)
+            encoded["rankBadge"] = model.rankBadge.map { value in .string(value) } ?? .null
+            encoded["body"] = .string(model.body)
+        }
+        return encoded
+    }
 }

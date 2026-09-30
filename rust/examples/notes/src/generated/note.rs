@@ -57,4 +57,14 @@ impl ReplicaRowModel for Note {
     }
 }
 
-impl ReplicaWritableRowModel for Note {}
+impl ReplicaWritableRowModel for Note {
+    fn encode_snapshot(&self) -> ReplicaFields {
+        let mut encoded = ReplicaFields::new();
+        encoded.insert("title".to_owned(), ReplicaValue::String(self.title.clone()));
+        encoded.insert(
+            "userId".to_owned(),
+            ReplicaValue::signed_integer(self.user_id),
+        );
+        encoded
+    }
+}

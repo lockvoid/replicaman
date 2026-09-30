@@ -33,7 +33,12 @@ pub trait ReplicaRowModel: Send + Sync + Clone + 'static {
 
 /// The marker split that makes readonly compile-time: writable models hang
 /// write verbs off `RowStream`; a readonly model never implements this.
-pub trait ReplicaWritableRowModel: ReplicaRowModel {}
+pub trait ReplicaWritableRowModel: ReplicaRowModel {
+    /// Complete local value at birth; `encode()` remains the writable journal payload.
+    fn encode_snapshot(&self) -> ReplicaFields {
+        self.encode()
+    }
+}
 
 pub trait ReplicaDocModel: Send + Sync + Clone + 'static {
     fn stream_name() -> &'static str;
@@ -228,11 +233,12 @@ impl<M: ReplicaWritableRowModel> RowStream<M> {
     /// Create exactly once; a present identity is a collision, not an edit.
     pub async fn create(&self, model: &M) -> ReplicaResult<()> {
         self.engine
-            .create_row(
+            .create_model_row(
                 M::stream_name(),
                 model.id(),
                 model.type_name(),
                 &model.encode(),
+                &model.encode_snapshot(),
             )
             .await
     }

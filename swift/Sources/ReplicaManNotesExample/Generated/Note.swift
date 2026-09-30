@@ -40,4 +40,11 @@ public struct Note: ReplicaWritableRowModel, ReplicaColumns, Equatable {
         encoded["userId"] = .signedInteger(Int64(userId))
         return encoded
     }
+
+    public func encodeSnapshot() -> [String: ReplicaValue] {
+        var encoded: [String: ReplicaValue] = [:]
+        encoded["title"] = .string(title)
+        encoded["userId"] = .signedInteger(Int64(userId))
+        return encoded
+    }
 }

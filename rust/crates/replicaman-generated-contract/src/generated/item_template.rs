@@ -208,4 +208,49 @@ impl ReplicaRowModel for ItemTemplate {
     }
 }
 
-impl ReplicaWritableRowModel for ItemTemplate {}
+impl ReplicaWritableRowModel for ItemTemplate {
+    fn encode_snapshot(&self) -> ReplicaFields {
+        let mut encoded = ReplicaFields::new();
+        match self {
+            ItemTemplate::PhotoItemTemplate(model) => {
+                encoded.insert("name".to_owned(), ReplicaValue::String(model.name.clone()));
+                encoded.insert(
+                    "userId".to_owned(),
+                    ReplicaValue::String(model.user_id.clone()),
+                );
+                encoded.insert(
+                    "aspect".to_owned(),
+                    model.aspect.as_ref().map_or(ReplicaValue::Null, |value| {
+                        ReplicaValue::String(value.clone())
+                    }),
+                );
+                encoded.insert(
+                    "tone".to_owned(),
+                    model.tone.as_ref().map_or(ReplicaValue::Null, |value| {
+                        ReplicaValue::String(value.as_wire().to_owned())
+                    }),
+                );
+            }
+            ItemTemplate::TextItemTemplate(model) => {
+                encoded.insert("name".to_owned(), ReplicaValue::String(model.name.clone()));
+                encoded.insert(
+                    "userId".to_owned(),
+                    ReplicaValue::String(model.user_id.clone()),
+                );
+                encoded.insert(
+                    "body".to_owned(),
+                    model.body.as_ref().map_or(ReplicaValue::Null, |value| {
+                        ReplicaValue::String(value.clone())
+                    }),
+                );
+                encoded.insert(
+                    "tone".to_owned(),
+                    model.tone.as_ref().map_or(ReplicaValue::Null, |value| {
+                        ReplicaValue::String(value.as_wire().to_owned())
+                    }),
+                );
+            }
+        }
+        encoded
+    }
+}

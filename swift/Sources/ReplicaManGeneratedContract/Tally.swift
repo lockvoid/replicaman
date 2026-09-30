@@ -52,4 +52,13 @@ public struct Tally: ReplicaWritableRowModel, ReplicaColumns, Equatable {
         encoded["version"] = .signedInteger(Int64(version))
         return encoded
     }
+
+    public func encodeSnapshot() -> [String: ReplicaValue] {
+        var encoded: [String: ReplicaValue] = [:]
+        encoded["count"] = .signedInteger(Int64(count))
+        encoded["status"] = .string(status)
+        encoded["userId"] = .string(userId)
+        encoded["version"] = .signedInteger(Int64(version))
+        return encoded
+    }
 }

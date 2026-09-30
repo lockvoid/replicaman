@@ -82,4 +82,22 @@ impl ReplicaRowModel for Tally {
     }
 }
 
-impl ReplicaWritableRowModel for Tally {}
+impl ReplicaWritableRowModel for Tally {
+    fn encode_snapshot(&self) -> ReplicaFields {
+        let mut encoded = ReplicaFields::new();
+        encoded.insert("count".to_owned(), ReplicaValue::signed_integer(self.count));
+        encoded.insert(
+            "status".to_owned(),
+            ReplicaValue::String(self.status.clone()),
+        );
+        encoded.insert(
+            "userId".to_owned(),
+            ReplicaValue::String(self.user_id.clone()),
+        );
+        encoded.insert(
+            "version".to_owned(),
+            ReplicaValue::signed_integer(self.version),
+        );
+        encoded
+    }
+}

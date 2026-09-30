@@ -53,6 +53,7 @@ impl ReplicaTransaction<'_, '_, '_> {
             id,
             row_type,
             data,
+            None,
             expectation,
             self.lane,
         )

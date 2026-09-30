@@ -200,4 +200,14 @@ public struct Export: ReplicaWritableRowModel, ReplicaColumns, Equatable {
         encoded["userId"] = .string(userId)
         return encoded
     }
+
+    public func encodeSnapshot() -> [String: ReplicaValue] {
+        var encoded: [String: ReplicaValue] = [:]
+        encoded["details"] = details.map { value in value } ?? .null
+        encoded["markers"] = .array(markers.map { .number($0) })
+        encoded["progress"] = .number(progress)
+        encoded["result"] = resultJSON
+        encoded["userId"] = .string(userId)
+        return encoded
+    }
 }

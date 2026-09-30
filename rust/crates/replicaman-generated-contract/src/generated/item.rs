@@ -292,4 +292,91 @@ impl ReplicaRowModel for Item {
     }
 }
 
-impl ReplicaWritableRowModel for Item {}
+impl ReplicaWritableRowModel for Item {
+    fn encode_snapshot(&self) -> ReplicaFields {
+        let mut encoded = ReplicaFields::new();
+        match self {
+            Item::PhotoItem(model) => {
+                encoded.insert(
+                    "annotation".to_owned(),
+                    model
+                        .annotation
+                        .as_ref()
+                        .map_or(ReplicaValue::Null, |value| {
+                            ReplicaValue::String(value.clone())
+                        }),
+                );
+                encoded.insert(
+                    "boardId".to_owned(),
+                    ReplicaValue::String(model.board_id.clone()),
+                );
+                encoded.insert(
+                    "label".to_owned(),
+                    model.label.as_ref().map_or(ReplicaValue::Null, |value| {
+                        ReplicaValue::String(value.as_wire().to_owned())
+                    }),
+                );
+                encoded.insert("rank".to_owned(), ReplicaValue::String(model.rank.clone()));
+                encoded.insert(
+                    "rankBadge".to_owned(),
+                    model
+                        .rank_badge
+                        .as_ref()
+                        .map_or(ReplicaValue::Null, |value| {
+                            ReplicaValue::String(value.clone())
+                        }),
+                );
+                encoded.insert(
+                    "caption".to_owned(),
+                    model.caption.as_ref().map_or(ReplicaValue::Null, |value| {
+                        ReplicaValue::String(value.as_wire().to_owned())
+                    }),
+                );
+                encoded.insert(
+                    "width".to_owned(),
+                    model.width.as_ref().map_or(ReplicaValue::Null, |value| {
+                        ReplicaValue::signed_integer(*value)
+                    }),
+                );
+            }
+            Item::TextItem(model) => {
+                encoded.insert(
+                    "annotation".to_owned(),
+                    model
+                        .annotation
+                        .as_ref()
+                        .map_or(ReplicaValue::Null, |value| {
+                            ReplicaValue::String(value.clone())
+                        }),
+                );
+                encoded.insert(
+                    "boardId".to_owned(),
+                    ReplicaValue::String(model.board_id.clone()),
+                );
+                encoded.insert(
+                    "label".to_owned(),
+                    model.label.as_ref().map_or(ReplicaValue::Null, |value| {
+                        ReplicaValue::String(value.as_wire().to_owned())
+                    }),
+                );
+                encoded.insert("rank".to_owned(), ReplicaValue::String(model.rank.clone()));
+                encoded.insert(
+                    "rankBadge".to_owned(),
+                    model
+                        .rank_badge
+                        .as_ref()
+                        .map_or(ReplicaValue::Null, |value| {
+                            ReplicaValue::String(value.clone())
+                        }),
+                );
+                encoded.insert(
+                    "body".to_owned(),
+                    model.body.as_ref().map_or(ReplicaValue::Null, |value| {
+                        ReplicaValue::String(value.clone())
+                    }),
+                );
+            }
+        }
+        encoded
+    }
+}

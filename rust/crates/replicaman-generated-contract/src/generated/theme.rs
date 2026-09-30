@@ -295,4 +295,55 @@ impl ReplicaRowModel for Theme {
     }
 }
 
-impl ReplicaWritableRowModel for Theme {}
+impl ReplicaWritableRowModel for Theme {
+    fn encode_snapshot(&self) -> ReplicaFields {
+        let mut encoded = ReplicaFields::new();
+        encoded.insert("colors".to_owned(), self.colors_json.clone());
+        encoded.insert(
+            "createdAt".to_owned(),
+            ReplicaValue::String(self.created_at.clone()),
+        );
+        encoded.insert(
+            "description".to_owned(),
+            self.description
+                .as_ref()
+                .map_or(ReplicaValue::Null, |value| {
+                    ReplicaValue::String(value.clone())
+                }),
+        );
+        encoded.insert(
+            "heading".to_owned(),
+            self.heading_json
+                .as_ref()
+                .map_or(ReplicaValue::Null, |value| value.clone()),
+        );
+        encoded.insert(
+            "logoRef".to_owned(),
+            self.logo_ref.as_ref().map_or(ReplicaValue::Null, |value| {
+                ReplicaValue::String(value.clone())
+            }),
+        );
+        encoded.insert(
+            "logoUrl".to_owned(),
+            self.logo_url.as_ref().map_or(ReplicaValue::Null, |value| {
+                ReplicaValue::String(value.clone())
+            }),
+        );
+        encoded.insert("name".to_owned(), ReplicaValue::String(self.name.clone()));
+        encoded.insert(
+            "pinned".to_owned(),
+            self.pinned
+                .as_ref()
+                .map_or(ReplicaValue::Null, |value| ReplicaValue::Bool(*value)),
+        );
+        encoded.insert(
+            "updatedAt".to_owned(),
+            ReplicaValue::String(self.updated_at.clone()),
+        );
+        encoded.insert(
+            "userId".to_owned(),
+            ReplicaValue::signed_integer(self.user_id),
+        );
+        encoded
+    }
+}

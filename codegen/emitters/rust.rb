@@ -1103,8 +1103,10 @@ end
 # `encode()` — save() diffs must not echo it back up the wire. Writable
 # optionals are full value semantics: None is an explicit `.null` clear so
 # save_row can distinguish it from a column the model does not author.
-def encode_lines(columns, indent, prefix: 'self.')
-  columns.select(&:push).map do |column|
+# A separate birth snapshot preserves every required local decode field;
+# the runtime must never journal that snapshot as the outbound payload.
+def encode_lines(columns, indent, prefix: 'self.', snapshot: false)
+  (snapshot ? columns : columns.select(&:push)).map do |column|
     reference = "#{prefix}#{column.storage_name}"
     if column.optional
       "#{indent}encoded.insert(#{rust_string(column.name)}.to_owned(), #{reference}.as_ref()" \
@@ -1300,13 +1302,35 @@ def model_decode_body(columns, indent, constructor, id_expression: 'id.to_owned(
   lines.join("\n")
 end
 
-def model_encode_body(columns, indent)
-  lines = encode_lines(columns, "#{indent}    ")
+def model_encode_body(columns, indent, snapshot: false)
+  lines = encode_lines(columns, "#{indent}    ", snapshot:)
   return "#{indent}    ReplicaFields::new()" if lines.empty?
 
   ([
     "#{indent}    let mut encoded = ReplicaFields::new();"
   ] + lines + ["#{indent}    encoded"]).join("\n")
+end
+
+def sti_encode_body(model, base, variants, snapshot: false)
+  arms = variants.map do |variant|
+    lines = encode_lines(base + variant_columns(variant), '                ', prefix: 'model.', snapshot:)
+    next "            #{model}::#{variant.fetch('rust_type')}(_) => {}" if lines.empty?
+
+    (["            #{model}::#{variant.fetch('rust_type')}(model) => {"] + lines + ['            }']).join("\n")
+  end
+  return '        ReplicaFields::new()' if arms.all? { it.end_with?('=> {}') }
+
+  (['        let mut encoded = ReplicaFields::new();', '        match self {'] + arms + ['        }', '        encoded']).join("\n")
+end
+
+def writable_impl(model, snapshot_body)
+  <<~RUST
+    impl ReplicaWritableRowModel for #{model} {
+        fn encode_snapshot(&self) -> ReplicaFields {
+    #{snapshot_body}
+        }
+    }
+  RUST
 end
 
 def model_projection_source(columns)
@@ -1389,7 +1413,7 @@ def row_model_source(stream, model, columns)
         }
     }
   RUST
-  body << "impl ReplicaWritableRowModel for #{model} {}\n" unless stream.fetch('readonly', nil)
+  body << writable_impl(model, model_encode_body(columns, '    ', snapshot: true)) unless stream.fetch('readonly', nil)
 
   rendered = join_items(body)
   join_items([MODEL_PRELUDE.result_with_hash(stream: stream),
@@ -1440,23 +1464,7 @@ def sti_model_source(stream, model, base, variants)
   id_arms = variants.map { "            #{model}::#{it.fetch('rust_type')}(model) => &model.id," }
   type_arms = variants.map { "            #{model}::#{it.fetch('rust_type')}(_) => Some(#{rust_string(it.fetch('type'))})," }
 
-  encode_arms = variants.map do |variant|
-    lines = encode_lines(base + variant_columns(variant), '                ', prefix: 'model.')
-    if lines.empty?
-      "            #{model}::#{variant.fetch('rust_type')}(_) => {}"
-    else
-      (["            #{model}::#{variant.fetch('rust_type')}(model) => {"] + lines + ['            }']).join("\n")
-    end
-  end
-  encode_body =
-    if variants.all? { encode_lines(base + variant_columns(it), '', prefix: 'model.').empty? }
-      '        ReplicaFields::new()'
-    else
-      ([
-        '        let mut encoded = ReplicaFields::new();',
-        '        match self {'
-      ] + encode_arms + ['        }', '        encoded']).join("\n")
-    end
+  encode_body = sti_encode_body(model, base, variants)
 
   body << <<~RUST
     impl ReplicaRowModel for #{model} {
@@ -1489,7 +1497,7 @@ def sti_model_source(stream, model, base, variants)
         }
     }
   RUST
-  body << "impl ReplicaWritableRowModel for #{model} {}\n" unless stream.fetch('readonly', nil)
+  body << writable_impl(model, sti_encode_body(model, base, variants, snapshot: true)) unless stream.fetch('readonly', nil)
 
   rendered = join_items(body)
   join_items([MODEL_PRELUDE.result_with_hash(stream: stream),

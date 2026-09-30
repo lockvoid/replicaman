@@ -181,15 +181,11 @@ def check_column!(stream, column)
           'a pulled row can never satisfy its decode guard'
   end
 
-  # The mirror, on streams the device can CREATE in: a column it cannot write
-  # is a column it cannot read back from its own create. The local snapshot
-  # IS `encode()`'s output, so a required pull-only column makes `init?`
-  # return nil and the row the device just authored is invisible on it until
-  # the push is acked — the client knowing local from remote, which the plane
-  # rules forbid. A stream whose own `createdAt` is pull-only is not
-  # creatable at all (a derived id, server-seeded, one patch door),
-  # so the rule has nothing to say about it. A column its document reflects
-  # is written by the engine from the seed.
+  # The mirror, on streams the device can CREATE in: a required column it
+  # cannot write is one it has no authored value for. A stream whose own
+  # `createdAt` is pull-only is not creatable at all (a derived id,
+  # server-seeded, one patch door), so the rule has nothing to say about it.
+  # A column its document reflects is written by the engine from the seed.
   creatable = stream.fetch('columns').any? { |c| c.fetch('name') == 'createdAt' && c.fetch('push', nil) }
   return unless creatable && column.fetch('push', nil) == false && column.fetch('null', nil) == false && !column.fetch('reflects', nil)
 
@@ -735,8 +731,10 @@ end
 # `encode()` — save() diffs must not echo it back up the wire. Writable
 # optionals are full value semantics: nil is an explicit `.null` clear so
 # saveRow can distinguish it from a column the model does not author.
-def encode_lines(columns, indent, prefix: '')
-  columns.select(&:push).map do |column|
+# A separate birth snapshot preserves every required local decode field;
+# the runtime must never journal that snapshot as the outbound payload.
+def encode_lines(columns, indent, prefix: '', snapshot: false)
+  (snapshot ? columns : columns.select(&:push)).map do |column|
     reference = "#{prefix}#{column.storage_name}"
     if column.optional
       "#{indent}encoded[\"#{column.name}\"] = #{reference}.map { value in #{column.encode_expression('value')} } ?? .null"
@@ -906,6 +904,16 @@ ROW_MODEL = ERB.new(<<~'SWIFT', trim_mode: '-')
           return encoded
   <% end -%>
       }
+  <% unless stream['readonly'] -%>
+
+      public func encodeSnapshot() -> [String: ReplicaValue] {
+          var encoded: [String: ReplicaValue] = [:]
+  <% encode_lines(columns, '        ', snapshot: true).each do |line| -%>
+  <%= line %>
+  <% end -%>
+          return encoded
+      }
+  <% end -%>
   }
 SWIFT
 
@@ -1013,6 +1021,27 @@ STI_MODEL = ERB.new(<<~'SWIFT', trim_mode: '-')
           return encoded
   <% end -%>
       }
+  <% unless stream['readonly'] -%>
+
+      public func encodeSnapshot() -> [String: ReplicaValue] {
+          var encoded: [String: ReplicaValue] = [:]
+          switch self {
+  <% variants.each do |variant| -%>
+  <% lines = encode_lines(base + variant_columns(stream, variant), '            ', prefix: 'model.', snapshot: true) -%>
+  <% if lines.empty? -%>
+          case .<%= lower_camel(variant['swift_type']) %>:
+              break
+  <% else -%>
+          case .<%= lower_camel(variant['swift_type']) %>(let model):
+  <% lines.each do |line| -%>
+  <%= line %>
+  <% end -%>
+  <% end -%>
+  <% end -%>
+          }
+          return encoded
+      }
+  <% end -%>
   }
 SWIFT
 

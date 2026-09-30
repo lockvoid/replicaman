@@ -166,4 +166,28 @@ public enum Item: ReplicaWritableRowModel, ReplicaColumns, Equatable {
         }
         return encoded
     }
+
+    public func encodeSnapshot() -> [String: ReplicaValue] {
+        var encoded: [String: ReplicaValue] = [:]
+        switch self {
+        case .photoItem(let model):
+            encoded["boardId"] = .string(model.boardId)
+            encoded["label"] = model.label.map { value in .string(value.rawValue) } ?? .null
+            encoded["rank"] = .string(model.rank)
+            encoded["rankBadge"] = model.rankBadge.map { value in .string(value) } ?? .null
+            encoded["stagedPreview"] = model.stagedPreview.map { value in .string(value) } ?? .null
+            encoded["tags"] = model.tags.map { value in .array(value.map { .string($0) }) } ?? .null
+            encoded["caption"] = model.caption.map { value in .string(value.rawValue) } ?? .null
+            encoded["width"] = model.width.map { value in .signedInteger(Int64(value)) } ?? .null
+        case .textItem(let model):
+            encoded["boardId"] = .string(model.boardId)
+            encoded["label"] = model.label.map { value in .string(value.rawValue) } ?? .null
+            encoded["rank"] = .string(model.rank)
+            encoded["rankBadge"] = model.rankBadge.map { value in .string(value) } ?? .null
+            encoded["stagedPreview"] = model.stagedPreview.map { value in .string(value) } ?? .null
+            encoded["tags"] = model.tags.map { value in .array(value.map { .string($0) }) } ?? .null
+            encoded["body"] = .string(model.body)
+        }
+        return encoded
+    }
 }

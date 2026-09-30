@@ -63,7 +63,7 @@ public final class ReplicaTransaction {
         }
         let wrote = try engine.applyRowWrite(
             db, store: store, spec: spec, stream: Model.streamName, id: model.id, type: model.typeName,
-            data: model.encode(), existing: nil, lane: lane, draft: draft
+            data: model.encode(), existing: nil, lane: lane, draft: draft, snapshot: model.encodeSnapshot()
         )
         journaled = journaled || wrote
     }

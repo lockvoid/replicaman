@@ -1341,3 +1341,30 @@ async fn corrupt_journal_prevents_a_false_blob_garbage_collection_proof() {
     assert!(engine.pending_row_ids("notes").await.is_err());
     assert_eq!(store.peek_pending().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn a_birth_keeps_its_snapshot_locally_and_journals_only_authored_fields() {
+    let store = store("birth-snapshot");
+    let engine = engine(store.clone(), StubTransport::new());
+    let authored = fields(&[("title", text("draft"))]);
+    let snapshot = fields(&[
+        ("title", text("draft")),
+        ("createdAt", text("2026-09-30T12:00:00Z")),
+    ]);
+
+    engine
+        .create_model_row("notes", "n1", None, &authored, &snapshot)
+        .await
+        .unwrap();
+
+    let row = store.peek_snapshot("notes", "n1").unwrap().expect("the birth is stored");
+    assert_eq!(
+        row.data.get("createdAt"),
+        Some(&text("2026-09-30T12:00:00Z")),
+        "the local birth keeps the server-owned value the model supplied"
+    );
+    let pending = store.peek_pending().unwrap();
+    let op = pending.first().expect("the birth is owed").op().unwrap();
+    let journaled: Vec<String> = op.data.unwrap_or_default().keys().cloned().collect();
+    assert_eq!(journaled, vec!["title".to_owned()], "the journal carries only authored fields");
+}

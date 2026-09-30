@@ -711,7 +711,8 @@ public actor ReplicaEngine {
         stream: String, id: String, type: String?,
         data: [String: ReplicaValue],
         existing: ReplicaStateStore.SnapshotRow?,
-        lane: ReplicaLane, draft: String?
+        lane: ReplicaLane, draft: String?,
+        snapshot: [String: ReplicaValue]? = nil
     ) throws -> Bool {
         try validateAtomicAddress(db, stream: stream, id: id, store: store)
         if let existing {
@@ -751,7 +752,10 @@ public actor ReplicaEngine {
                 stream: stream, rowId: id, type: type, data: data
             )
             try enqueueOp(db, op, store: store, preimage: ReplicaPreimage.absent.encoded(), lane: lane, draft: draft)
-            try store.upsertSnapshot(db, stream: stream, rowId: id, shard: spec.shard, type: type, data: data)
+            // The journal carries only authored fields. The local birth keeps
+            // required server-owned values supplied by the generated model.
+            let birth = (snapshot ?? [:]).merging(data) { _, authored in authored }
+            try store.upsertSnapshot(db, stream: stream, rowId: id, shard: spec.shard, type: type, data: birth)
         }
         return true
     }

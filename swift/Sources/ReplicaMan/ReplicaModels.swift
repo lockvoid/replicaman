@@ -34,7 +34,16 @@ public protocol ReplicaRowModel: Identifiable, Sendable where ID == String {
 /// The marker split that makes readonly compile-time: a writable model has
 /// write verbs inside a transaction (`TransactionRows`); a readonly model
 /// never conforms.
-public protocol ReplicaWritableRowModel: ReplicaRowModel {}
+public protocol ReplicaWritableRowModel: ReplicaRowModel {
+    /// Complete local value at birth; `encode()` remains the writable journal payload.
+    func encodeSnapshot() -> [String: ReplicaValue]
+}
+
+extension ReplicaWritableRowModel {
+    public func encodeSnapshot() -> [String: ReplicaValue] {
+        encode()
+    }
+}
 
 public protocol ReplicaDocModel: Identifiable, Sendable where ID == String {
     associatedtype Field: ReplicaIndexedField = ReplicaNoField
