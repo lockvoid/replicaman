@@ -48,6 +48,7 @@ module ReplicaMan
     def read
       buckets = @replica.buckets(@user, @shard)
       cursor = Cursor.decode(@body.fetch('cursor', nil), buckets)
+      @bootstrap = Cursor.bootstrap?(@body.fetch('cursor', nil))
       heads = @heads = Buckets.heads(@replica.namespace, buckets)
       raise Protocol::Error.new('CursorInvalid') if buckets.any? { cursor.fetch(it) > heads.fetch(it) }
 
@@ -61,12 +62,13 @@ module ReplicaMan
         reached[bucket] = read_bucket(bucket, cursor.fetch(bucket))
       end
 
+      more = buckets.any? { reached.fetch(it) < heads.fetch(it) }
       Protocol.header(@replica).merge(
         shard: @shard,
         reset: @body.fetch('cursor', nil).nil?,
         frames: @frames,
-        cursor: Cursor.encode(reached),
-        more: buckets.any? { reached.fetch(it) < heads.fetch(it) }
+        cursor: Cursor.encode(reached, bootstrap: @bootstrap && more),
+        more: more
       )
     end
 
@@ -80,8 +82,8 @@ module ReplicaMan
       reached = since
 
       loop do
-        entries = changes(bucket, reached, @limit - @entities, live: since.zero?)
-        return since.zero? ? @heads.fetch(bucket) : reached if entries.empty?
+        entries = changes(bucket, reached, @limit - @entities, live: @bootstrap)
+        return @bootstrap ? @heads.fetch(bucket) : reached if entries.empty?
 
         entries.each do |entry|
           emit(entry, since)
@@ -105,8 +107,6 @@ module ReplicaMan
     end
 
     def emit(entry, since)
-      bootstrap = since.zero?
-
       @entities += 1
       if entry.deleted_at
         return append(frame: 'row.delete', stream: entry.stream, id: entry.row_id,
@@ -116,7 +116,7 @@ module ReplicaMan
       entry.data = payload(entry, :data) if entry.data.nil?
       return append(row_set(entry)) unless @replica.streams.fetch(entry.stream.to_sym).document?
 
-      baseline = bootstrap || entry.document_position > since
+      baseline = @bootstrap || entry.document_position > since
       return append(doc_snapshot(entry)) if baseline
 
       deltas(entry, since).each { append(it) }

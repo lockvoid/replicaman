@@ -139,6 +139,37 @@ class PullTest < ActiveSupport::TestCase
     assert_equal 17, result.fetch(:pages), 'the complete checkpoint spans bounded pages'
   end
 
+  # 10-01, production: a project edited after younger rows landed sits past the
+  # first page of a fresh install's bootstrap; the second page shipped its
+  # deltas as if the phone held the baseline, and the phone refused the round.
+  test 'a bootstrap past one page ships every document as a baseline, never a delta' do
+    create_board('b1', @user, 'Plans')
+    Job.create!(id: 'j1', user: @user, state: 'queued')
+    DummyReplica.document(:boards, 'b1').edit { it.get_map('meta').set('color', 'blue') }
+
+    result = pull_checkpoint(DummyReplica, user: @user, cursor: nil, limit: 1)
+    frames = result[:frames].group_by { it[:frame] }
+
+    assert_operator result.fetch(:pages), :>, 1, 'the round must span pages'
+    assert_equal ['b1'], frames.fetch('doc.snapshot').map { it[:id] }
+    assert_nil frames['doc.delta'], 'a fresh client holds no baseline to apply a delta to'
+    doc = Loro::Doc.from_snapshot(Base64.strict_decode64(frames.fetch('doc.snapshot').first[:snapshot]))
+    assert_equal 'blue', doc.get_map('meta').get('color'), 'the baseline carries the edit'
+  end
+
+  test 'a bootstrap cursor stays a bootstrap until its last page' do
+    create_board('b1', @user, 'Plans')
+    Job.create!(id: 'j1', user: @user, state: 'queued')
+    client = ProtocolClient.new(@user)
+
+    first = client.pull(cursor: nil, limit: 1)
+    assert first.fetch(:more)
+    assert ReplicaMan::Cursor.bootstrap?(first.fetch(:cursor)), 'the round is not over'
+
+    last = client.checkpoint(cursor: first.fetch(:cursor), limit: 10)
+    refute ReplicaMan::Cursor.bootstrap?(last.fetch(:cursor)), 'the published cursor reads incrementally from here'
+  end
+
   test 'a bootstrap reads live rows only and still reaches the bucket head' do
     Job.create!(id: 'j1', user: @user, state: 'queued')
     Job.create!(id: 'j2', user: @user, state: 'queued').destroy!
