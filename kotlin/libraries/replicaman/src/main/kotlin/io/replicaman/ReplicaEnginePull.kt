@@ -41,11 +41,19 @@ internal suspend fun ReplicaEngine.downloadPage(shard: String, store: ReplicaSta
         return 0 to true
     }
     val publication = ReplicaPublication()
-    val published = liveDocuments.publishing {
-        store.write { db ->
-            store.adoptDataset(db, served)
-            if (current(db)) publishRound(db, shard, round, page.frames, page.cursor, store, publication) else null
-        }?.also { publication.deliver(liveDocuments) }
+    val published = try {
+        liveDocuments.publishing {
+            store.write { db ->
+                store.adoptDataset(db, served)
+                if (current(db)) publishRound(db, shard, round, page.frames, page.cursor, store, publication) else null
+            }?.also { publication.deliver(liveDocuments) }
+        }
+    } catch (error: ReplicaError.Protocol) {
+        // A staged baseline the server can no longer answer coherently is forgotten, not resumed: the
+        // shard bootstraps again. An incremental round keeps its checkpoint and throws; a first page throws.
+        if (!round.reset || round.cursor == null) throw error
+        store.write { db -> if (current(db)) store.clearCursor(db, shard) }
+        return 0 to true
     }
     return if (published == null) 0 to true else published to false
 }

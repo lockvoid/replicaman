@@ -50,6 +50,41 @@ class PullRoundTests : ReplicaTestCase() {
             transport.protocolFixture.requests(ReplicaEndpoint.PULL).map { it["dataset"] })
     }
 
+    /**
+     * 10-01: a round staged against a server that then changed its paging kept resuming with its
+     * old cursor, and its answer could never be published — a delta for a document the device had
+     * no baseline for. A round that cannot be published is forgotten; the shard bootstraps again.
+     */
+    @Test fun aRoundThatCannotBePublishedIsForgottenAndTheShardBootstrapsAgain() = runBlocking<Unit> {
+        val store = Fixture.storeAt(Fixture.path())
+        val transport = StubTransport().apply {
+            queuePull("user", ReplicaPullResponse(listOf(Fixture.note("n1", "one")), "c1", more = true))
+            queuePull("user", ReplicaPullResponse(
+                listOf(ReplicaFrame.DocDelta("boards", "b1", 1, "stub@1", "+a".toByteArray())), "c2", more = false))
+            queuePull("user", ReplicaPullResponse(
+                listOf(ReplicaFrame.DocSnapshot("boards", "b1", "stub@1", "SNAP".toByteArray(), emptyMap())), "c3", more = false))
+        }
+        val engine = Fixture.engine(store = store, transport = transport)
+
+        assertEquals(1, engine.pullUntilCaughtUp(listOf("user")), "the second round publishes the baseline")
+
+        assertEquals(listOf(null, "c1", null), pullCursors(transport), "the poisoned round is dropped, not resumed")
+        assertEquals(null to 0, staged(store))
+        assertTrue(store.allSnapshots().any { it.stream == "boards" && it.rowId == "b1" })
+    }
+
+    /** A baseline round that still cannot be published is the server's fault and reaches the caller. */
+    @Test fun aBootstrapThatCannotBePublishedFails() = runBlocking<Unit> {
+        val transport = StubTransport().apply {
+            queuePull("user", ReplicaPullResponse(
+                listOf(ReplicaFrame.DocDelta("boards", "b1", 1, "stub@1", "+a".toByteArray())), "c1", more = false))
+        }
+        val engine = Fixture.engine(store = Fixture.storeAt(Fixture.path()), transport = transport)
+
+        assertEquals("InvalidResponse", assertFailsWith<ReplicaError.Protocol> { engine.pullUntilCaughtUp(listOf("user")) }.code)
+        assertEquals(listOf<String?>(null), pullCursors(transport))
+    }
+
     /** KILL: handle `DatasetChanged` like a refused cursor — the store drops its cursor and rebuilds onto a restored history. */
     @Test fun anotherDatasetStopsSynchronizationAndPreservesLocalBytes() = runBlocking<Unit> {
         val path = Fixture.path()

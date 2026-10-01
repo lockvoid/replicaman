@@ -41,19 +41,30 @@ extension ReplicaEngine {
 
         var evicted = Set<LiveDocuments.Key>()
         var absorbing: [(LiveDocuments.Key, Data)] = []
-        let applied = try liveDocuments.publishing { () throws -> Int? in
-            let published = try store.pool.write { db -> Int? in
-                try store.adoptDataset(db, page.header.dataset)
-                guard try current(db) else { return nil }
-                try store.stage(db, shard: shard, content: content, cursor: page.cursor)
-                return try publishRound(db, shard: shard, round: round, cursor: page.cursor, store: store,
-                                        evicted: &evicted, absorbing: &absorbing)
+        let applied: Int?
+        do {
+            applied = try liveDocuments.publishing { () throws -> Int? in
+                let published = try store.pool.write { db -> Int? in
+                    try store.adoptDataset(db, page.header.dataset)
+                    guard try current(db) else { return nil }
+                    try store.stage(db, shard: shard, content: content, cursor: page.cursor)
+                    return try publishRound(db, shard: shard, round: round, cursor: page.cursor, store: store,
+                                            evicted: &evicted, absorbing: &absorbing)
+                }
+                if published != nil {
+                    for key in evicted { liveDocuments.evict(key) }
+                    for (key, fold) in absorbing { liveDocuments.absorb(key, payloads: [fold]) }
+                }
+                return published
             }
-            if published != nil {
-                for key in evicted { liveDocuments.evict(key) }
-                for (key, fold) in absorbing { liveDocuments.absorb(key, payloads: [fold]) }
+        } catch ReplicaError.protocolFailure where round.reset && round.cursor != nil {
+            // A staged baseline the server can no longer answer coherently is forgotten, not resumed: the
+            // shard bootstraps again. An incremental round keeps its checkpoint and throws; a first page throws.
+            try await store.pool.write { db in
+                guard try current(db) else { return }
+                try store.clearCursor(db, shard: shard)
             }
-            return published
+            return (0, true)
         }
         guard let applied else { return (0, true) }
         return (applied, false)

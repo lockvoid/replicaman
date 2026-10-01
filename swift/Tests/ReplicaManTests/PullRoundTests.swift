@@ -54,6 +54,56 @@ final class PullRoundTests: XCTestCase {
         XCTAssertEqual(cursors, [nil, "c1", "c2"])
     }
 
+    /// 10-01: a round staged against a server that then changed its paging
+    /// kept resuming with its old cursor, and the server's answer could never
+    /// be published — a delta for a document the device had no baseline for,
+    /// on every launch. A round that cannot be published is forgotten, and the
+    /// shard bootstraps again from nothing.
+    func testARoundThatCannotBePublishedIsForgottenAndTheShardBootstrapsAgain() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport)
+        await transport.queuePull(shard: "user", .init(frames: [Fixture.note("n1", title: "one")], cursor: "c1", more: true))
+        await transport.queuePull(shard: "user", .init(
+            frames: [.docDelta(stream: "boards", id: "b1", seq: 1, codec: "stub@1", payload: Data("+a".utf8))],
+            cursor: "c2", more: false))
+        await transport.queuePull(shard: "user", .init(
+            frames: [.docSnapshot(stream: "boards", id: "b1", codec: "stub@1", snapshot: Data("SNAP".utf8), data: ["name": .string("Plans")])],
+            cursor: "c3", more: false))
+
+        let published = try await engine.pullUntilCaughtUp(shards: ["user"])
+
+        XCTAssertEqual(published, 1, "the second round publishes the baseline")
+        XCTAssertNotNil(try store.peekDoc("boards", "b1"))
+        let cursor = try await engine.currentCursor()
+        XCTAssertEqual(cursor, "c3")
+        let after = try await staging(store)
+        XCTAssertEqual(after.pages, 0)
+        XCTAssertNil(after.round)
+        let cursors = await requestedCursors(transport)
+        XCTAssertEqual(cursors, [nil, "c1", nil], "the poisoned round is dropped, not resumed")
+    }
+
+    /// A baseline round that still cannot be published is the server's fault,
+    /// and the failure reaches the caller — forgetting it again would spin.
+    func testABootstrapThatCannotBePublishedFails() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport)
+        await transport.queuePull(shard: "user", .init(
+            frames: [.docDelta(stream: "boards", id: "b1", seq: 1, codec: "stub@1", payload: Data("+a".utf8))],
+            cursor: "c1", more: false))
+
+        do {
+            _ = try await engine.pullUntilCaughtUp(shards: ["user"])
+            XCTFail("a delta with no baseline on a bootstrap must fail")
+        } catch ReplicaError.protocolFailure(let code, _) {
+            XCTAssertEqual(code, "InvalidResponse")
+        }
+        let cursors = await requestedCursors(transport)
+        XCTAssertEqual(cursors, [nil])
+    }
+
     /// A fresh install's first launch: the warm-up and the knocker pull the
     /// user shard at once, and the snapshot is more than one page. Both callers
     /// must finish the round — on 2026-09-30 the second spun on the first's
