@@ -627,10 +627,10 @@ public actor ReplicaEngine {
         let flight = Task { () throws -> (applied: Int, more: Bool) in
             do {
                 let page = try await self.downloadPage(shard: shard)
-                await self.landPull(shard: shard, id: id)
+                self.landPull(shard: shard, id: id)
                 return page
             } catch {
-                await self.landPull(shard: shard, id: id)
+                self.landPull(shard: shard, id: id)
                 throw error
             }
         }
