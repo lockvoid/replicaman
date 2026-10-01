@@ -54,6 +54,44 @@ final class PullRoundTests: XCTestCase {
         XCTAssertEqual(cursors, [nil, "c1", "c2"])
     }
 
+    /// A fresh install's first launch: the warm-up and the knocker pull the
+    /// user shard at once, and the snapshot is more than one page. Both callers
+    /// must finish the round — on 2026-09-30 the second spun on the first's
+    /// finished flight, holding the actor at 99% CPU with no request sent.
+    func testTwoCallersOnAPageWithMoreToComeBothFinishTheRound() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport)
+        await transport.delayPulls(nanos: 200_000_000)
+        await transport.queuePull(shard: "user", .init(frames: [Fixture.note("n1", title: "one")], cursor: "c1", more: true))
+        await transport.queuePull(shard: "user", .init(frames: [Fixture.note("n2", title: "two")], cursor: "c2", more: false))
+
+        let first = Task { try await engine.pullUntilCaughtUp(shards: ["user"]) }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let second = Task { try await engine.pullUntilCaughtUp(shards: ["user"]) }
+        let finished = try await withThrowingTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                _ = try await first.value
+                _ = try await second.value
+                return true
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+                first.cancel()
+                second.cancel()
+                return false
+            }
+            let result = try await group.next() ?? false
+            group.cancelAll()
+            return result
+        }
+
+        XCTAssertTrue(finished, "two callers on a staged page never finished the round")
+        XCTAssertEqual(try store.peekSnapshot("notes", "n2")?.data["title"], .string("two"))
+        let cursors = await requestedCursors(transport)
+        XCTAssertEqual(cursors, [nil, "c1"])
+    }
+
     func testAStagedRoundResumesFromItsCursorAfterTheProcessEnds() async throws {
         let store = try Fixture.store()
         let transport = StubTransport()

@@ -51,7 +51,11 @@ public actor ReplicaEngine {
     /// One flight per lane: that is what lets an interactive write leave while
     /// a bulk push is still on the wire.
     private var activeDrains: [ReplicaLane: Task<[ReplicaVerdict], Error>] = [:]
-    private var activePulls: [String: Task<(applied: Int, more: Bool), Error>] = [:]
+    /// One flight per shard, and it leaves this map itself before anyone sees
+    /// its page: a caller looping on `more` must never find the flight it just
+    /// awaited — awaiting a finished task does not suspend, so the loop would
+    /// hold the actor and the flight's owner could never clear it.
+    private var activePulls: [String: (id: UUID, task: Task<(applied: Int, more: Bool), Error>)] = [:]
     /// Local transactions run on their caller's thread; this is what a seal
     /// waits on for them, the way it waits on `activeWireOperations`.
     nonisolated let writeGate = ReplicaWriteGate()
@@ -618,11 +622,25 @@ public actor ReplicaEngine {
     }
 
     private func pullPage(shard: String) async throws -> (applied: Int, more: Bool) {
-        if let flight = activePulls[shard] { return try await awaitPull(flight) }
-        let flight = Task { try await self.downloadPage(shard: shard) }
-        activePulls[shard] = flight
-        defer { activePulls[shard] = nil }
+        if let flight = activePulls[shard] { return try await awaitPull(flight.task) }
+        let id = UUID()
+        let flight = Task { () throws -> (applied: Int, more: Bool) in
+            do {
+                let page = try await self.downloadPage(shard: shard)
+                await self.landPull(shard: shard, id: id)
+                return page
+            } catch {
+                await self.landPull(shard: shard, id: id)
+                throw error
+            }
+        }
+        activePulls[shard] = (id, flight)
         return try await awaitPull(flight)
+    }
+
+    private func landPull(shard: String, id: UUID) {
+        guard activePulls[shard]?.id == id else { return }
+        activePulls[shard] = nil
     }
 
     private func downloadPage(shard: String) async throws -> (applied: Int, more: Bool) {
