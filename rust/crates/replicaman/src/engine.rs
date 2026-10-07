@@ -840,7 +840,7 @@ impl ReplicaEngine {
         if self.binding.store().is_none() || self.is_sealed().await {
             return Ok(0);
         }
-        self.drain_if_warm().await?;
+        self.push_before_pull().await?;
         Ok(self.pull_page(shard).await?.applied)
     }
 
@@ -851,7 +851,7 @@ impl ReplicaEngine {
         if self.binding.store().is_none() || self.is_sealed().await {
             return Ok(0);
         }
-        self.drain_if_warm().await?;
+        self.push_before_pull().await?;
         let shards: Vec<String> = shards
             .map(<[String]>::to_vec)
             .unwrap_or_else(|| self.schema.shards().to_vec());
@@ -2258,6 +2258,11 @@ impl ReplicaEngine {
         result
     }
 
+    /// The barrier variant: skips while the wire is known-cold — offline must
+    /// not stack timeouts. A dead wire is the engine's to handle: it is
+    /// reported, the lane cools, and the caller goes on. Any other failure —
+    /// the server's refusal, the journal — is the caller's. Explicit `drain()`
+    /// never skips.
     pub async fn drain_if_warm(&self) -> ReplicaResult<()> {
         // Lanes share the frozen submissions. A failure must not retry those
         // same submissions through the other lane in this barrier.
@@ -2268,19 +2273,31 @@ impl ReplicaEngine {
             };
             if !cold {
                 if let Err(error) = self.drain_lane(lane).await {
-                    if matches!(error, ReplicaError::IdentityTransitionInProgress) {
+                    if !matches!(error, ReplicaError::Transport(_)) {
                         return Err(error);
                     }
-                    // Push and pull are independent: whatever stops the push —
-                    // the wire, the server's refusal, the journal — is reported,
-                    // its submissions stay for their own retry, and the shard
-                    // keeps receiving.
                     self.health.record("push before pull", error);
                     return Ok(());
                 }
             }
         }
         Ok(())
+    }
+
+    /// The pull's own barrier. Push and pull are independent: whatever stops
+    /// the push — the wire, the server's refusal, the journal — is reported,
+    /// its submissions stay for their own retry, and the shard keeps receiving.
+    async fn push_before_pull(&self) -> ReplicaResult<()> {
+        match self.drain_if_warm().await {
+            Ok(()) => Ok(()),
+            Err(ReplicaError::IdentityTransitionInProgress) => {
+                Err(ReplicaError::IdentityTransitionInProgress)
+            }
+            Err(error) => {
+                self.health.record("push before pull", error);
+                Ok(())
+            }
+        }
     }
 }
 

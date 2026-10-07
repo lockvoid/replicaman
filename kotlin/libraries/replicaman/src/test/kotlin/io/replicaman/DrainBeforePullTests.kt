@@ -9,6 +9,9 @@ import io.replicaman.support.StubTransport
 import io.replicaman.support.peekPending
 import io.replicaman.support.peekSnapshot
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -59,6 +62,26 @@ class DrainBeforePullTests : ReplicaTestCase() {
         assertEquals("from the server", store.peekSnapshot("notes", "n2")?.data?.get("title")?.string)
         assertEquals(1, store.peekPending().size, "the refused submission stays frozen for its own retry")
         assertEquals("push before pull", engine.health.failure.value?.operation)
+    }
+
+    /**
+     * An explicit warm drain hands the server's refusal to its caller: a host barrier names its
+     * own operation. The engine takes only a dead wire.
+     */
+    @Test
+    fun anExplicitWarmDrainHandsTheServersRefusalToItsCaller() = runTest {
+        val store = Fixture.store()
+        val transport = StubTransport()
+        val engine = Fixture.engine(store = store, transport = transport)
+        engine.pullOnce("user")
+        engine.saveRow("notes", "n1", null, mapOf("title" to ReplicaValue.Str("mine")))
+        transport.refusePushes(error = ReplicaError.Protocol("unauthenticated", "HTTP 401"))
+
+        assertFailsWith<ReplicaError.Protocol> { engine.drainIfWarm() }
+
+        assertNull(engine.health.failure.value, "the refusal is the caller's to report")
+        assertEquals(1, store.peekPending().size)
+        assertFalse(engine.isColdForTesting(ReplicaLane.BULK), "a refusal is not a dead wire")
     }
 
     /** KILL: push unconditionally before every pull — a read costs two requests. */

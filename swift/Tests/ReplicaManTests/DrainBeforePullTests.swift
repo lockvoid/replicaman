@@ -52,6 +52,29 @@ final class DrainBeforePullTests: XCTestCase {
     /// Push and pull are independent: a push the server refuses — one bad
     /// operation fails the whole request, on every retry — reaches health and
     /// never keeps the shard from receiving.
+    /// An explicit warm drain hands the server's refusal to its caller: a host
+    /// barrier names its own operation. The engine takes only a dead wire.
+    func testAnExplicitWarmDrainHandsTheServersRefusalToItsCaller() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport)
+        try await engine.pullOnce(shard: "user")
+        try await engine.saveRow(stream: "notes", id: "n1", type: nil, data: ["title": .string("mine")])
+        await transport.failPushes(throwing: .protocolFailure(code: "unauthenticated", message: "HTTP 401"))
+
+        do {
+            try await engine.drainIfWarm()
+            XCTFail("the refusal must reach the caller")
+        } catch ReplicaError.protocolFailure(let code, _) {
+            XCTAssertEqual(code, "unauthenticated")
+        }
+
+        XCTAssertNil(engine.health.lastFailure, "the refusal is the caller's to report")
+        XCTAssertEqual(try store.peekPending().count, 1)
+        let cold = await engine.isColdForTesting(.bulk)
+        XCTAssertFalse(cold, "a refusal is not a dead wire")
+    }
+
     func testAPushTheServerRefusesDoesNotStopThePull() async throws {
         let store = try Fixture.store()
         let transport = StubTransport()

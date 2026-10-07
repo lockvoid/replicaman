@@ -765,7 +765,7 @@ public class ReplicaEngine(
      */
     public suspend fun pullOnce(shard: String = "user"): Int {
         if (withContext(engineContext) { binding.store == null || sealedFlag }) return 0
-        drainIfWarm()
+        pushBeforePull()
         return pullPage(shard).applied
     }
 
@@ -782,7 +782,7 @@ public class ReplicaEngine(
      */
     public suspend fun pullUntilCaughtUp(shards: List<String>? = null): Int {
         if (withContext(engineContext) { binding.store == null || sealedFlag }) return 0
-        drainIfWarm()
+        pushBeforePull()
         var total = 0
         for (shard in shards ?: schema.shards) {
             var forgotten: ReplicaError? = null
@@ -1542,11 +1542,11 @@ public class ReplicaEngine(
     }
 
     /**
-     * The barrier variant: skips while the wire is known-cold — offline
-     * must not stack timeouts. Push and pull are independent: whatever stops
-     * a push — a dead wire, a refused request, bytes that will not freeze —
-     * reaches health and never keeps the pull from receiving. Cancellation
-     * and a sealed engine propagate. Explicit drains never skip.
+     * The barrier variant: skips while the wire is known-cold — offline must
+     * not stack timeouts. A dead wire is the engine's to handle: it is
+     * reported, the lane cools, and the caller goes on. Any other failure —
+     * the server's refusal, the journal — is the caller's. Explicit `drain()`
+     * never skips.
      */
     public suspend fun drainIfWarm() {
         // Both priorities share the frozen submissions. Once they fail to
@@ -1555,12 +1555,26 @@ public class ReplicaEngine(
             if (withContext(engineContext) { isCold(lane) }) continue
             try {
                 drain(lane)
-            } catch (error: Exception) {
-                if (error is CancellationException || error is ReplicaError.IdentityTransitionInProgress) throw error
+            } catch (error: ReplicaError.Transport) {
                 health.record(error, "push before pull")
                 Log.logger.warning("[drain] warm drain of $lane failed: $error")
                 return
             }
+        }
+    }
+
+    /**
+     * The pull's own barrier. Push and pull are independent: whatever stops
+     * the push — the wire, the server's refusal, the journal — is reported,
+     * its submissions stay for their own retry, and the shard keeps receiving.
+     */
+    private suspend fun pushBeforePull() {
+        try {
+            drainIfWarm()
+        } catch (error: Exception) {
+            if (error is CancellationException || error is ReplicaError.IdentityTransitionInProgress) throw error
+            health.record(error, "push before pull")
+            Log.logger.warning("[pull] push before pull failed: $error")
         }
     }
 

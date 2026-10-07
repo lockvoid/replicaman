@@ -1176,6 +1176,40 @@ async fn empty_journal_pulls_without_a_push() {
     assert_eq!(transport.pull_count(), 1);
 }
 
+/// An explicit warm drain hands the server's refusal to its caller: a host
+/// barrier names its own operation. The engine takes only a dead wire.
+#[tokio::test]
+async fn an_explicit_warm_drain_hands_the_servers_refusal_to_its_caller() {
+    let store = store("drain-if-warm-refused");
+    let transport = StubTransport::new();
+    let engine = engine(store.clone(), transport.clone());
+    engine.pull_once("user").await.unwrap();
+    engine
+        .save_row("notes", "n1", None, &fields(&[("title", text("mine"))]))
+        .await
+        .unwrap();
+    transport.fail_pushes_with(Some(crate::ReplicaError::Protocol {
+        code: "unauthenticated".into(),
+        message: "HTTP 401".into(),
+    }));
+
+    let refused = engine.drain_if_warm().await;
+
+    assert!(
+        matches!(refused, Err(crate::ReplicaError::Protocol { ref code, .. }) if code == "unauthenticated"),
+        "the refusal must reach the caller: {refused:?}"
+    );
+    assert!(
+        engine.health.last_failure().is_none(),
+        "the refusal is the caller's to report"
+    );
+    assert_eq!(store.peek_pending().unwrap().len(), 1);
+    assert!(
+        !engine.is_cold_for_testing(ReplicaLane::Bulk).await,
+        "a refusal is not a dead wire"
+    );
+}
+
 /// Push and pull are independent: a push the server refuses — one bad
 /// operation fails the whole request, on every retry — reaches health and
 /// never keeps the shard from receiving.

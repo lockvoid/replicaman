@@ -596,7 +596,7 @@ public actor ReplicaEngine {
     @discardableResult
     public func pullOnce(shard: String = "user") async throws -> Int {
         guard binding.store != nil, !sealed else { return 0 }
-        try await drainIfWarm()
+        try await pushBeforePull()
         return try await pullPage(shard: shard).applied
     }
 
@@ -612,7 +612,7 @@ public actor ReplicaEngine {
     @discardableResult
     public func pullUntilCaughtUp(shards: [String]? = nil) async throws -> Int {
         guard binding.store != nil, !sealed else { return 0 }
-        try await drainIfWarm()
+        try await pushBeforePull()
         var total = 0
         for shard in shards ?? schema.shards {
             var forgotten: ReplicaError?
@@ -1365,10 +1365,10 @@ public actor ReplicaEngine {
     }
 
     /// The barrier variant: skips while the wire is known-cold — offline
-    /// must not stack timeouts. Push and pull are independent: whatever stops
-    /// a push — a dead wire, a refused request, bytes that will not freeze —
-    /// is reported through health and never keeps the pull from receiving.
-    /// Cancellation and a sealed engine propagate. Explicit `drain()` never skips.
+    /// must not stack timeouts. A dead wire is the engine's to handle: it is
+    /// reported, the lane cools, and the caller goes on. Any other failure —
+    /// the server's refusal, the journal — is the caller's. Explicit `drain()`
+    /// never skips.
     public func drainIfWarm() async throws {
         // Both priorities share the frozen prefix. Once that
         // prefix fails, this barrier must not retry it through another lane.
@@ -1376,13 +1376,26 @@ public actor ReplicaEngine {
             do {
                 _ = try await drain(lane)
             } catch {
-                if Task.isCancelled || error is CancellationError { throw error }
-                if case ReplicaError.identityTransitionInProgress = error { throw error }
-
+                guard case ReplicaError.transport = error else { throw error }
                 health.record(error, operation: "push before pull")
                 Log.logger.warning("[drain] warm drain of \(String(describing: lane), privacy: .public) failed: \(String(describing: error), privacy: .public)")
                 return
             }
+        }
+    }
+
+    /// The pull's own barrier. Push and pull are independent: whatever stops
+    /// the push — the wire, the server's refusal, the journal — is reported,
+    /// its submissions stay for their own retry, and the shard keeps receiving.
+    private func pushBeforePull() async throws {
+        do {
+            try await drainIfWarm()
+        } catch {
+            if Task.isCancelled || error is CancellationError { throw error }
+            if case ReplicaError.identityTransitionInProgress = error { throw error }
+
+            health.record(error, operation: "push before pull")
+            Log.logger.warning("[pull] push before pull failed: \(String(describing: error), privacy: .public)")
         }
     }
 
