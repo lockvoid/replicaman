@@ -2,6 +2,9 @@ package io.replicaman
 
 import io.replicaman.testing.ReplicaPullResponse
 import io.replicaman.testing.fixtureSeedRow
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import io.replicaman.support.Fixture
@@ -14,6 +17,7 @@ import io.replicaman.support.peekSnapshot
 import kotlin.test.assertEquals
 import kotlin.test.assertContentEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.test.assertNull
@@ -24,6 +28,36 @@ import kotlin.test.assertNull
  * included); a row stream's delete drops the snapshot row alone.
  */
 class DeleteCascadeTests : ReplicaTestCase() {
+
+    /**
+     * A doorbell's round started before this device's own delete was accepted, and carries the
+     * tombstone. The accepted intent is the server's state waiting for a round, not authoring:
+     * there is nothing to archive.
+     */
+    @Test
+    fun anAcceptedDeleteSeenByARoundStartedBeforeItLeavesNoRecoveryRecord() = runBlocking<Unit> {
+        val store = Fixture.store()
+        val transport = StubTransport()
+        val engine = Fixture.engine(store = store, transport = transport)
+        transport.queuePull("user", ReplicaPullResponse(frames = listOf(Fixture.note("n1", "one")), cursor = "c1", more = false))
+        engine.pullOnce()
+
+        val entered = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        transport.onPull { entered.complete(Unit); gate.await() }
+        transport.queuePull("user", ReplicaPullResponse(frames = listOf(ReplicaFrame.RowDelete("notes", "n1")), cursor = "c2", more = false))
+        val pull = async { engine.pullOnce() }
+        entered.await()
+        engine.deleteRow("notes", "n1")
+        engine.drain()
+        gate.complete(Unit)
+        pull.await()
+
+        assertNull(store.peekSnapshot("notes", "n1"))
+        assertEquals(0, store.recoveryRecords().size)
+        assertFalse(store.syncStatus().hasUnsettledWork)
+        assertEquals(0, store.peekPending().size)
+    }
 
     /** KILL: drop the `discardEntries` call from the document branch — the dead doc keeps owing. */
     @Test

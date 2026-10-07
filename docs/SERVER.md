@@ -87,7 +87,7 @@ For replication-specific rules, subclass `ReplicaMan::Normalizer::Row` and assig
 
 Ordinary creates colliding with existing identities are refused. Implement `create_existing` only when your domain deliberately allows that collision. The framework locks the record and checks membership before calling it; your handler must validate and persist the intended result.
 
-Required data should use `fetch` so a missing value fails at its source. Let unexpected storage and infrastructure exceptions propagate. A declared refusal is committed as a business verdict; an infrastructure failure rolls back the whole request, and the client retries the same operations.
+Required data should use `fetch` so a missing value fails at its source. A declared refusal is committed as a business verdict. So is a failure the same operation would meet again — invalid data, a violated constraint, an exception raised by the handler: the group rolls back and the verdict records the failure's reason, the exception is logged with its backtrace, and the client's journal moves on. Only transient failures — contention, lost connections, timeouts — roll back the whole request for the client to retry.
 
 ## Capture application writes
 
@@ -167,6 +167,15 @@ class AddReplicaStreams < ActiveRecord::Migration[8.1]
   end
 end
 ```
+
+Engine migrations ship with the gem; after upgrading it, install the new ones before serving requests:
+
+```sh
+bin/rails replica_man:install:migrations
+bin/rails db:migrate
+```
+
+Compaction — `compact`, and the automatic fold every 64 deltas — is a captured change: the folded document takes the position claimed at commit, and the deferred capture guard refuses a commit that leaves a fold without one.
 
 Every statement reverses. The objects live in `db/structure.sql`, so use `config.active_record.schema_format = :sql`. Assert in a test that `ReplicaMan::Schema::Plan.new([NotesReplica]).changes` is empty, so a forgotten migration fails the build. Backfill existing rows before clients depend on them:
 

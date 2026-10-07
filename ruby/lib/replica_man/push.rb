@@ -103,7 +103,7 @@ module ReplicaMan
       mutation = Mutation.new(@replica, origin: @origin)
 
       # A refusal rolls back the group's domain changes; its claimed ids stay
-      # with the recorded refusal. Infrastructure failures escape and retry.
+      # with the recorded refusal. A transient failure escapes and the request retries.
       ActiveRecord::Base.transaction(requires_new: true) do
         lock_entities(operations)
         operations.each { mutation.apply(it) }
@@ -112,12 +112,11 @@ module ReplicaMan
       operations.map { { id: it.id, outcome: 'accepted' } }
     rescue Refused => error
       rejected(operations, error.message)
-    rescue ActiveRecord::RecordInvalid => error
-      rejected(operations, error.record.errors.full_messages.join('; '))
-    rescue ActiveModel::RangeError, ActiveRecord::RangeError => error
-      rejected(operations, error.message)
-    rescue ActiveRecord::RecordNotUnique
-      rejected(operations, 'a unique field is already taken')
+    rescue StandardError => error
+      raise if Failure.transient?(error)
+
+      Failure.report(error, operations)
+      rejected(operations, Failure.reason(error))
     end
 
     def lock_entities(operations)

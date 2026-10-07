@@ -99,6 +99,9 @@ Rust uses snake_case names for the same fields. `hasUnsettledWork` / `has_unsett
 | `DatasetChanged` or `NamespaceChanged` | Stops the invalid exchange and retains local bytes | Enter a deliberate recovery flow |
 | `CursorInvalid` | Discards staging and starts a baseline round | Nothing; the next pull rebuilds the base |
 | Corrupt or incomplete pull page | Publishes no partial round | Surface the error and preserve the current store |
+| History the base cannot absorb, or a staged baseline the server no longer answers coherently | Forgets the round and baselines the shard; a second failure in one walk propagates | Nothing on the first; surface the second |
+| A push the server refuses as a request (HTTP 400), or a journal the engine cannot read | Reports background health from the pull's own barrier (`push before pull`) and keeps the submissions; the shard keeps receiving | Surface the health failure; push and pull are independent |
+| A row id outside the business key, or one write over the request limit | Refuses the write at the door (`invalidRowId`, `oversizedWrite`) | Fix the key or split the write |
 | Local storage failure | Fails the save or reports background health | Do not report the edit as saved |
 
 The native HTTP transports honor valid `Retry-After` advice after HTTP 429 or 5xx. Waiting is cancellable. The failure still reaches the caller and acknowledges no work.

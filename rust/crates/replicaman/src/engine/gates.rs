@@ -191,10 +191,32 @@ impl ReplicaEngine {
                 ReplicaOp::new(id::ulid(), verb::ROW_CREATE, &hold.stream, &hold.row_id).with_codec(doc.codec).with_seed(doc.fold)
             }
         } else if let Some(data) = current {
-            let pushed = self.schema.spec(&hold.stream).and_then(|spec| spec.pushed.as_ref());
-            let data = data.into_iter().filter(|(key, _)| pushed.is_none_or(|fields| fields.contains(key))).collect();
-            ReplicaOp::new(id::ulid(), if hold.server_knows { verb::ROW_PATCH } else { verb::ROW_CREATE }, &hold.stream, &hold.row_id)
-                .with_type(existing.and_then(|row| row.row_type).or_else(|| landing.and_then(|op| op.row_type.clone()))).with_data(data)
+            let spec = self.schema.spec(&hold.stream);
+            let pushed = spec.and_then(|spec| spec.pushed.as_ref());
+            let sendable: ReplicaFields = data.iter().filter(|(key, _)| pushed.is_none_or(|fields| fields.contains(*key)))
+                .map(|(key, value)| (key.clone(), value.clone())).collect();
+            if hold.server_knows {
+                // A patch of what moved against the base the hold tracked: a field
+                // the server moved meanwhile, and the device did not, stays the server's.
+                let base = match ReplicaPreimage::parse(&hold.preimage)? {
+                    ReplicaPreimage::Row { data, .. } => data,
+                    _ => ReplicaFields::new(),
+                };
+                let mut moved: ReplicaFields = sendable.into_iter().filter(|(key, value)| base.get(key) != Some(value)).collect();
+                if moved.is_empty() {
+                    store.drop_gate_hold(ctx, &hold.stream, &hold.row_id)?;
+                    return Ok(true);
+                }
+                for field in spec.map(|spec| spec.preconditions.as_slice()).unwrap_or_default() {
+                    if !moved.contains_key(field) && let Some(value) = data.get(field) {
+                        moved.insert(field.clone(), value.clone());
+                    }
+                }
+                ReplicaOp::new(id::ulid(), verb::ROW_PATCH, &hold.stream, &hold.row_id).with_data(moved)
+            } else {
+                ReplicaOp::new(id::ulid(), verb::ROW_CREATE, &hold.stream, &hold.row_id)
+                    .with_type(existing.and_then(|row| row.row_type).or_else(|| landing.and_then(|op| op.row_type.clone()))).with_data(sendable)
+            }
         } else { ReplicaOp::new(id::ulid(), verb::ROW_DELETE, &hold.stream, &hold.row_id) };
         store.drop_gate_hold(ctx, &hold.stream, &hold.row_id)?;
         let preimage = if op.verb == verb::ROW_PATCH {

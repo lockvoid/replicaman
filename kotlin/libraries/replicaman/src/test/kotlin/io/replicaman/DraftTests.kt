@@ -1,5 +1,6 @@
 package io.replicaman
 
+import io.replicaman.testing.ReplicaPullResponse
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -83,6 +84,51 @@ class DraftTests : ReplicaTestCase() {
         val sent = transport.pushedBatches().flatten()
         assertEquals(listOf(ReplicaOp.Verb.ROW_CREATE, ReplicaOp.Verb.DOC_DELTA), sent.map { it.verb })
         assertEquals("SEED+a+b", sent.last().payload?.decodeToString())
+    }
+
+    /** A draft can touch rows the server already has: discarding undoes those writes through their preimages, the way a refusal would. */
+    @Test fun discardRestoresTheServerRowsTheDraftPatchedOrDeleted() = runTest {
+        val store = Fixture.store(); val transport = StubTransport(); val engine = Fixture.engine(store, transport = transport)
+        transport.queuePull("user", ReplicaPullResponse(listOf(
+            ReplicaFrame.RowSet("notes", "n1", null, mapOf("title" to ReplicaValue.Str("server"), "rank" to ReplicaValue.Str("1"))),
+            ReplicaFrame.RowSet("notes", "n3", null, mapOf("title" to ReplicaValue.Str("doomed")))), "c1", more = false))
+        engine.pullOnce()
+        engine.saveRow("notes", "n1", null, mapOf("rank" to ReplicaValue.Str("2")))
+
+        val result = engine.beginDraft {
+            engine.saveRow("notes", "n1", null, mapOf("title" to ReplicaValue.Str("edited in a draft")))
+            birth(engine, "n4")
+            engine.deleteRow("notes", "n3")
+        }
+        engine.discardDraft(result.draft)
+
+        assertEquals(mapOf("title" to ReplicaValue.Str("server"), "rank" to ReplicaValue.Str("2")), store.peekSnapshot("notes", "n1")?.data)
+        assertEquals(mapOf("title" to ReplicaValue.Str("doomed")), store.peekSnapshot("notes", "n3")?.data)
+        assertNull(store.peekSnapshot("notes", "n4")); assertEquals(0L, held(store))
+        assertEquals(listOf("n1"), store.peekPending().map { it.op().rowId })
+        engine.drain()
+        assertEquals(listOf(mapOf("rank" to ReplicaValue.Str("2"))), transport.pushedBatches().flatten().map { it.data })
+    }
+
+    /** Discarding must give a document back; only a document the draft bore has nothing to give back. */
+    @Test fun aDraftEditsAndDeletesOnlyTheDocumentsItCreated() = runTest {
+        val store = Fixture.store(); val transport = StubTransport(); val engine = Fixture.engine(store, transport = transport)
+        transport.queuePull("user", ReplicaPullResponse(listOf(
+            ReplicaFrame.DocSnapshot("boards", "b1", "stub@1", "SEED".toByteArray(), mapOf("name" to ReplicaValue.Str("Board")))), "c1", more = false))
+        engine.pullOnce()
+
+        val result = engine.beginDraft {
+            engine.createDoc("boards", "b2", "MINE".toByteArray(), 7uL)
+            engine.recordDocDelta("boards", "b2", "+ok".toByteArray())
+            assertFailsWith<ReplicaError.DraftBlocked> { engine.recordDocDelta("boards", "b1", "+draft".toByteArray()) }
+            assertFailsWith<ReplicaError.DraftBlocked> { engine.deleteRow("boards", "b1") }
+        }
+
+        assertContentEquals("SEED".toByteArray(), store.peekDoc("boards", "b1")?.fold, "the pulled document is untouched")
+        assertContentEquals("MINE+ok".toByteArray(), store.peekDoc("boards", "b2")?.fold)
+        engine.discardDraft(result.draft)
+        assertNull(store.peekDoc("boards", "b2")); assertNotNull(store.peekDoc("boards", "b1"))
+        assertEquals(0, store.peekPending().size)
     }
 
     /** KILL: enqueue a delete after an undrained birth; the server learns a dismissed draft existed. */

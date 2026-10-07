@@ -196,7 +196,7 @@ async fn refresh_preserves_offline_authoring_and_records_delivery_failure() {
     assert_eq!(row.data["rank"], text("b"));
     assert_eq!(store.peek_pending().unwrap().len(), 1);
     let failure = engine.health.last_failure().unwrap();
-    assert_eq!(failure.operation, "drain before pull");
+    assert_eq!(failure.operation, "push before pull");
     assert_eq!(
         failure.error,
         ReplicaError::Transport("push refused (stub)".into())

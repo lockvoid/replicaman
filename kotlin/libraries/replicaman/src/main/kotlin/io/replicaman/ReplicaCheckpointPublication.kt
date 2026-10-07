@@ -130,10 +130,22 @@ internal fun ReplicaEngine.materializeBase(
     if (base == null) return
     store.setIncarnation(db, stream, id, shard, base.incarnation)
     var row = ReplicaStateStore.SnapshotRow(stream, id, base.type, base.data)
-    val held = if (store.hold(db, stream, id) != null) store.snapshot(db, stream, id) else null
-    if (held != null) {
+    val hold = store.hold(db, stream, id)
+    val held = if (hold != null) store.snapshot(db, stream, id) else null
+    if (hold != null && held != null) {
+        // A held row keeps the fields the device moved — those that differ from the
+        // base it was held against — and takes the server's value for every other
+        // field, so it leaves as exactly what the device changed.
+        val seen = (ReplicaPreimage.require(hold.preimage) as? ReplicaPreimage.Row)?.data.orEmpty()
         val pushed = schema.spec(stream)?.pushed
-        row = held.copy(data = held.data + base.data.filterKeys { pushed != null && it !in pushed })
+        val data = held.data.toMutableMap()
+        for ((key, value) in base.data) {
+            if (held.data[key] == seen[key] || (pushed != null && key !in pushed)) data[key] = value
+        }
+        for (key in seen.keys) {
+            if (base.data[key] == null && held.data[key] == seen[key]) data.remove(key)
+        }
+        row = held.copy(data = data)
         store.setHoldPreimage(db, stream, id, ReplicaPreimage.Row(shard, base.type, base.data).encoded())
     }
 

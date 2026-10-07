@@ -1,14 +1,32 @@
 import Foundation
 import GRDB
 
+/// What one `/pull` request did: the frames it published, whether the shard
+/// has more to pull, and — when the request found the round could not be
+/// published — the failure the round was forgotten for.
+struct PullStep: Sendable {
+    let applied: Int
+    let more: Bool
+    let forgotten: ReplicaError?
+
+    static let staged = PullStep(applied: 0, more: true, forgotten: nil)
+
+    static func published(_ count: Int) -> PullStep {
+        PullStep(applied: count, more: false, forgotten: nil)
+    }
+
+    static func restarted(_ reason: ReplicaError) -> PullStep {
+        PullStep(applied: 0, more: true, forgotten: reason)
+    }
+}
+
 extension ReplicaEngine {
     /// One `/pull` request of the shard's round. An answer with more to come
     /// is staged; the answer that completes the round publishes every staged
     /// page, the rebased local authoring and the cursor in one transaction.
-    /// `applied` counts the frames this request published.
     func downloadPage(
         shard: String, store: ReplicaStateStore, connection: ReplicaConnection
-    ) async throws -> (applied: Int, more: Bool) {
+    ) async throws -> PullStep {
         try store.requireDocumentMode(documentMode)
         let (round, generation, dataset) = try await store.pool.write { db in
             (try store.beginRound(db, shard: shard), try store.readGeneration(db, shard: shard), try store.meta(db).dataset)
@@ -16,18 +34,25 @@ extension ReplicaEngine {
         @Sendable func current(_ db: Database) throws -> Bool {
             try store.readGeneration(db, shard: shard) == generation && store.round(db, shard: shard) == round
         }
+        @Sendable func forget(_ reason: ReplicaError) async throws -> PullStep {
+            try await store.pool.write { db in
+                guard try current(db) else { return }
+                try store.clearCursor(db, shard: shard)
+            }
+            return .restarted(reason)
+        }
 
         let page: ReplicaPullPage
         let content: Data
         do {
             (page, content) = try await connection.pull(shard: shard, cursor: round.cursor, limit: batchLimit, dataset: dataset)
-        } catch ReplicaError.protocolFailure(let code, _) where code == "CursorInvalid" {
+        } catch ReplicaError.protocolFailure(let code, let message) where code == "CursorInvalid" {
             try await store.pool.write { db in
                 guard try current(db) else { return }
                 try store.discardDownload(db, shard: shard)
                 _ = try store.startRound(db, shard: shard, cursor: nil)
             }
-            return (0, true)
+            return .restarted(.protocolFailure(code: code, message: message))
         }
 
         guard !page.more else {
@@ -36,7 +61,7 @@ extension ReplicaEngine {
                 guard try current(db) else { return }
                 try store.stage(db, shard: shard, content: content, cursor: page.cursor)
             }
-            return (0, true)
+            return .staged
         }
 
         var evicted = Set<LiveDocuments.Key>()
@@ -57,17 +82,17 @@ extension ReplicaEngine {
                 }
                 return published
             }
-        } catch ReplicaError.protocolFailure where round.reset && round.cursor != nil {
+        } catch ReplicaError.protocolFailure(let code, let message) where round.reset && round.cursor != nil {
             // A staged baseline the server can no longer answer coherently is forgotten, not resumed: the
             // shard bootstraps again. An incremental round keeps its checkpoint and throws; a first page throws.
-            try await store.pool.write { db in
-                guard try current(db) else { return }
-                try store.clearCursor(db, shard: shard)
-            }
-            return (0, true)
+            return try await forget(.protocolFailure(code: code, message: message))
+        } catch ReplicaError.missingCausalDeps where !round.reset {
+            // History the base cannot absorb means the base is no longer the server's: only a baseline
+            // replaces it. A baseline that cannot be absorbed is the server's fault and throws.
+            return try await forget(.missingCausalDeps)
         }
-        guard let applied else { return (0, true) }
-        return (applied, false)
+        guard let applied else { return .staged }
+        return .published(applied)
     }
 
     private func publishRound(
@@ -181,11 +206,19 @@ extension ReplicaEngine {
         guard let base else { return }
         try store.setIncarnation(db, stream: stream, id: id, shard: shard, incarnation: base.incarnation)
         var row = ReplicaStateStore.SnapshotRow(stream: stream, rowId: id, type: base.type, data: base.data)
-        if try store.hold(db, stream: stream, rowId: id) != nil,
+        if let hold = try store.hold(db, stream: stream, rowId: id),
            var held = try store.snapshot(db, stream: stream, rowId: id) {
+            // A held row keeps the fields the device moved — those that differ from
+            // the base it was held against — and takes the server's value for
+            // every other field, so it leaves as exactly what the device changed.
+            var seen: [String: ReplicaValue] = [:]
+            if case .row(_, _, let data) = try ReplicaPreimage.decode(hold.preimage) { seen = data }
             let pushed = schema.spec(stream)?.pushed
-            for (key, value) in base.data where pushed?.contains(key) == false {
+            for (key, value) in base.data where held.data[key] == seen[key] || pushed?.contains(key) == false {
                 held.data[key] = value
+            }
+            for key in seen.keys where base.data[key] == nil && held.data[key] == seen[key] {
+                held.data.removeValue(forKey: key)
             }
             row = held
             try store.setHoldPreimage(db, stream: stream, rowId: id,

@@ -78,7 +78,7 @@ final class GateReleaseTests: XCTestCase {
 
     /// KILL: `journalRelease` — release every row as a create; the server
     /// already has this one.
-    func testARowTheServerKnowsLeavesAsOnePatchOfEveryField() async throws {
+    func testARowTheServerKnowsLeavesAsOnePatchOfEveryFieldItMoved() async throws {
         let store = try Fixture.store()
         let transport = StubTransport()
         let released = ReleaseLedger()
@@ -130,7 +130,41 @@ final class GateReleaseTests: XCTestCase {
         try await settled(engine, holding: [])
         _ = try await engine.drain()
         let sent = await transport.pushedOps()
-        XCTAssertEqual(sent.last?.data, ["title": .string("a"), "blob": .string("k1")])
+        XCTAssertEqual(sent.last?.data, ["blob": .string("k1")], "the title the device never moved is not sent")
+    }
+
+    /// A field the server moved while the row was held, and the device did
+    /// not, is the server's: the held row shows it, and the release carries
+    /// only what the device moved.
+    ///
+    /// KILL: `materializeBase` — merge no base field into a held row; or
+    /// `journalRelease` — send `current` instead of what moved against the base.
+    func testAReleasedPatchLeavesAFieldTheServerMovedAlone() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let backup = BackupFlag(on: true)
+        let engine = Fixture.engine(store: store, transport: transport, syncGates: [backup.gate])
+        await transport.queuePull(shard: "user", ReplicaPullResponse(frames: [
+            .rowSet(stream: "notes", id: "n1", type: nil, data: ["title": .string("a"), "rank": .string("1")]),
+        ], cursor: "c1", more: false))
+        try await engine.pullOnce()
+
+        backup.set(false)
+        try await engine.saveRow(stream: "notes", id: "n1", type: nil, data: ["title": .string("b")])
+        await transport.queuePull(shard: "user", ReplicaPullResponse(frames: [
+            .rowSet(stream: "notes", id: "n1", type: nil, data: ["title": .string("a"), "rank": .string("2")]),
+        ], cursor: "c2", more: false))
+        try await engine.pullOnce()
+        XCTAssertEqual(try store.peekSnapshot("notes", "n1")?.data, ["title": .string("b"), "rank": .string("2")],
+                       "the held row keeps what the device moved and shows what the server moved")
+
+        backup.set(true)
+        try await settled(engine, holding: [])
+        _ = try await engine.drain()
+
+        let sent = await transport.pushedOps()
+        XCTAssertEqual(sent.map(\.verb), [ReplicaOp.Verb.rowPatch])
+        XCTAssertEqual(sent.first?.data, ["title": .string("b")], "rank 2 is the server's; the device never touched it")
     }
 
     func testARowDeletedWhileHeldLeavesAsADeleteWhenTheServerKnowsIt() async throws {
@@ -181,7 +215,7 @@ final class GateReleaseTests: XCTestCase {
 
         let sent = await transport.pushedOps()
         XCTAssertEqual(sent.map(\.verb), [ReplicaOp.Verb.rowPatch])
-        XCTAssertEqual(sent.first?.data, ["title": .string("a"), "blob": .string("k1")])
+        XCTAssertEqual(sent.first?.data, ["blob": .string("k1")])
     }
 
     /// KILL: `askAgain` — drop the `current != nil || held.serverKnows` guard;

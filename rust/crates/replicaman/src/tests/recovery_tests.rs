@@ -167,8 +167,11 @@ async fn archive_failure_rolls_back_every_part_and_keeps_the_original() {
     );
 }
 
+/// Push and pull are independent: a journal the engine cannot read fails
+/// every explicit drain loudly and reaches health from the pull's own
+/// barrier, while the shard keeps receiving. The damaged bytes stay as they are.
 #[tokio::test]
-async fn corrupt_journal_failure_propagates_on_every_pull() {
+async fn a_corrupt_journal_fails_the_drain_loudly_and_never_keeps_the_shard_from_receiving() {
     let store = store("failed-authoring-pull");
     let transport = StubTransport::new();
     let engine = engine(store.clone(), transport.clone());
@@ -184,14 +187,33 @@ async fn corrupt_journal_failure_propagates_on_every_pull() {
             Ok(())
         })
         .unwrap();
+    transport.queue_pull(
+        "user",
+        ScriptedPull::new(vec![note("n2", "from the server", None)], "c1", false),
+    );
+
     for _ in 0..2 {
         assert!(matches!(
-            engine.pull_once("user").await,
+            engine.drain().await,
             Err(ReplicaError::Storage(_))
         ));
     }
-    assert_eq!(transport.pull_count(), 0);
-    assert_eq!(engine.current_cursor("user").await.unwrap(), None);
+    let published = engine.pull_once("user").await.unwrap();
+
+    assert_eq!(published, 1);
+    assert_eq!(
+        store.peek_snapshot("notes", "n2").unwrap().unwrap().data["title"],
+        text("from the server")
+    );
+    assert_eq!(transport.pull_count(), 1);
+    assert_eq!(
+        engine.current_cursor("user").await.unwrap().as_deref(),
+        Some("c1")
+    );
+    assert_eq!(
+        engine.health.last_failure().unwrap().operation,
+        "push before pull"
+    );
     assert_eq!(
         store
             .pool()

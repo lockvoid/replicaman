@@ -20,6 +20,7 @@ module ReplicaMan
   autoload :References
   autoload :ProjectionDependencies
   autoload :EntityFence
+  autoload :Failure
   autoload :Protocol
   autoload :Buckets
   autoload :Cursor

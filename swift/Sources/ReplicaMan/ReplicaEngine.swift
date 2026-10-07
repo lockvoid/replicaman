@@ -55,7 +55,7 @@ public actor ReplicaEngine {
     /// its page: a caller looping on `more` must never find the flight it just
     /// awaited — awaiting a finished task does not suspend, so the loop would
     /// hold the actor and the flight's owner could never clear it.
-    private var activePulls: [String: (id: UUID, task: Task<(applied: Int, more: Bool), Error>)] = [:]
+    private var activePulls: [String: (id: UUID, task: Task<PullStep, Error>)] = [:]
     /// Local transactions run on their caller's thread; this is what a seal
     /// waits on for them, the way it waits on `activeWireOperations`.
     nonisolated let writeGate = ReplicaWriteGate()
@@ -467,19 +467,14 @@ public actor ReplicaEngine {
         schedulePush()
     }
 
+    /// Idempotent; an unknown key is silence. The draft's writes are undone the
+    /// way a refusal undoes them — newest first, through their preimages — so a
+    /// row the draft patched or deleted stands as it stood before the draft,
+    /// and a row the draft bore is gone with its lifetime.
     public func discardDraft(_ draft: ReplicaDraft) async throws {
         let store = try writableStore()
-        let documents = try await store.pool.write { db -> [LiveDocuments.Key] in
-            var documents: [LiveDocuments.Key] = []
-            for address in try store.draftAddresses(db, key: draft.key) {
-                try store.deleteSnapshot(db, stream: address.stream, rowId: address.rowId)
-                if schema.spec(address.stream)?.lane == .document {
-                    try store.deleteDoc(db, stream: address.stream, rowId: address.rowId)
-                    documents.append(LiveDocuments.Key(stream: address.stream, id: address.rowId))
-                }
-            }
-            try store.dropDraftEntries(db, key: draft.key)
-            return documents
+        let documents = try liveDocuments.publishing {
+            try store.pool.write { db in try revertDraft(db, key: draft.key, store: store) }
         }
         for key in documents { liveDocuments.evict(key) }
     }
@@ -492,15 +487,36 @@ public actor ReplicaEngine {
                 for address in try store.draftAddresses(db, key: key) {
                     try store.archiveEntity(db, stream: address.stream, id: address.rowId,
                         reason: "Uncommitted draft recovered after restart")
-                    try store.deleteSnapshot(db, stream: address.stream, rowId: address.rowId)
-                    if schema.spec(address.stream)?.lane == .document {
-                        try store.deleteDoc(db, stream: address.stream, rowId: address.rowId)
-                    }
                 }
-                try store.dropDraftEntries(db, key: key)
+                _ = try revertDraft(db, key: key, store: store)
                 Log.logger.info("[open] swept a draft that outlived its process (\(key, privacy: .public))")
             }
         }
+    }
+
+    /// The draft's entries undone newest first and dropped. Returns the
+    /// documents the draft bore, which the engine must stop holding.
+    private nonisolated func revertDraft(_ db: Database, key: String, store: ReplicaStateStore) throws -> [LiveDocuments.Key] {
+        var born: [LiveDocuments.Key] = []
+        for entry in try store.draftEntries(db, key: key).reversed() {
+            let op = try entry.op()
+            if let raw = entry.preimage {
+                let preimage = try ReplicaPreimage.decode(raw)
+                try revert(db, op: op, preimage: preimage, store: store, cascading: false)
+                if op.verb == ReplicaOp.Verb.rowCreate, case .absent = preimage {
+                    born.append(LiveDocuments.Key(stream: op.stream, id: op.rowId))
+                }
+            }
+            try store.discard(db, id: entry.id)
+        }
+        for address in born {
+            if schema.spec(address.stream)?.lane == .document {
+                try store.deleteDoc(db, stream: address.stream, rowId: address.id)
+            }
+            try store.dropHold(db, stream: address.stream, rowId: address.id)
+            try store.cancelUnsentBirth(db, stream: address.stream, id: address.id)
+        }
+        return born.filter { schema.spec($0.stream)?.lane == .document }
     }
 
     /// Where the bound owner's world lives on disk — nil while closed.
@@ -589,16 +605,25 @@ public actor ReplicaEngine {
     /// shard; the doorbell asks for the one it rang for — the server rings
     /// for the user shard only, so a full walk per ring was a wasted catalog
     /// round-trip each time.
+    ///
+    /// A round the shard cannot publish is forgotten once: the shard starts a
+    /// fresh baseline. A second round it cannot publish is the server's fault,
+    /// and its failure reaches the caller instead of another download.
     @discardableResult
     public func pullUntilCaughtUp(shards: [String]? = nil) async throws -> Int {
         guard binding.store != nil, !sealed else { return 0 }
         try await drainIfWarm()
         var total = 0
         for shard in shards ?? schema.shards {
+            var forgotten: ReplicaError?
             while true {
-                let page = try await pullPage(shard: shard)
-                total += page.applied
-                if !page.more { break }
+                let step = try await pullPage(shard: shard)
+                if let reason = step.forgotten {
+                    if forgotten != nil { throw reason }
+                    forgotten = reason
+                }
+                total += step.applied
+                if !step.more { break }
             }
         }
         return total
@@ -621,10 +646,10 @@ public actor ReplicaEngine {
         }
     }
 
-    private func pullPage(shard: String) async throws -> (applied: Int, more: Bool) {
+    private func pullPage(shard: String) async throws -> PullStep {
         if let flight = activePulls[shard] { return try await awaitPull(flight.task) }
         let id = UUID()
-        let flight = Task { () throws -> (applied: Int, more: Bool) in
+        let flight = Task { () throws -> PullStep in
             do {
                 let page = try await self.downloadPage(shard: shard)
                 self.landPull(shard: shard, id: id)
@@ -643,14 +668,14 @@ public actor ReplicaEngine {
         activePulls[shard] = nil
     }
 
-    private func downloadPage(shard: String) async throws -> (applied: Int, more: Bool) {
+    private func downloadPage(shard: String) async throws -> PullStep {
         let store = try beginWireOperation()
         defer { endWireOperation() }
         return try await downloadPage(shard: shard, store: store,
                                       connection: ReplicaConnection(transport: transport, schema: schema))
     }
 
-    private func awaitPull(_ flight: Task<(applied: Int, more: Bool), Error>) async throws -> (applied: Int, more: Bool) {
+    private func awaitPull(_ flight: Task<PullStep, Error>) async throws -> PullStep {
         try await withTaskCancellationHandler {
             let result = try await flight.value
             try Task.checkCancellation()
@@ -724,6 +749,15 @@ public actor ReplicaEngine {
     /// One row write inside an OPEN transaction — the shared body of
     /// `saveRow` and `write`. A no-change diff is absorbed (returns false,
     /// nothing journaled).
+    /// The protocol's business key: UTF-8 of 1 to 1024 bytes without NUL. A
+    /// write outside it is refused here — the server would refuse the whole
+    /// push carrying it, on every retry.
+    nonisolated static func validateAddress(stream: String, id: String) throws {
+        guard !id.isEmpty, id.utf8.count <= 1024, !id.utf8.contains(0) else {
+            throw ReplicaError.invalidRowId(stream: stream, id: id)
+        }
+    }
+
     nonisolated func applyRowWrite(
         _ db: Database, store: ReplicaStateStore, spec: ReplicaStreamSpec,
         stream: String, id: String, type: String?,
@@ -732,6 +766,7 @@ public actor ReplicaEngine {
         lane: ReplicaLane, draft: String?,
         snapshot: [String: ReplicaValue]? = nil
     ) throws -> Bool {
+        try Self.validateAddress(stream: stream, id: id)
         try validateAtomicAddress(db, stream: stream, id: id, store: store)
         if let existing {
             // A missing row field and an explicit JSON null are the same
@@ -821,11 +856,16 @@ public actor ReplicaEngine {
         _ db: Database, store: ReplicaStateStore, spec: ReplicaStreamSpec,
         stream: String, id: String, lane: ReplicaLane, draft: String?
     ) throws -> Bool {
+        try Self.validateAddress(stream: stream, id: id)
         try validateAtomicAddress(db, stream: stream, id: id, store: store)
         let incarnation = try store.incarnation(db, stream: stream, id: id)
         let births = try store.entriesAddressing(
             db, stream: stream, rowId: id, verb: ReplicaOp.Verb.rowCreate
         ).filter { try $0.op().incarnation == incarnation }
+        if let draft, spec.lane == .document, try store.draftBirth(db, stream: stream, rowId: id) != draft {
+            // A document's fold dies with its local deletion; a draft could not give it back.
+            throw ReplicaError.draftBlocked("A draft cannot delete a document it did not create: \(stream)/\(id)")
+        }
         // A refused birth is a definite answer; a frozen one may already be
         // committed server-side.
         let heardBirth = births.first { $0.parked == nil && $0.sent }
@@ -890,6 +930,7 @@ public actor ReplicaEngine {
         let store = try writableStore()
         let spec = try writableSpec(stream)
         guard spec.lane == .document else { throw ReplicaError.laneMismatch(stream) }
+        try Self.validateAddress(stream: stream, id: id)
         let codecName = try codecName(for: spec)
         var rowData = stamped(data, stamp: spec.stamp, userId: binding.owner)
         guard let codec = codecs[codecName] else { throw ReplicaError.codec("no codec registered for \(codecName)") }
@@ -1052,6 +1093,10 @@ public actor ReplicaEngine {
             // what THEY name yet.
             alsoWalk = try queued.map { try ReplicaJSON.decoder().decode(ReplicaOp.self, from: $0.payload) }
         }
+        if op.verb == ReplicaOp.Verb.docDelta, let key, try store.draftBirth(db, stream: op.stream, rowId: op.rowId) != key {
+            // Discarding the draft must give the document back; only a document the draft bore has nothing to give back.
+            throw ReplicaError.draftBlocked("A draft edits only the documents it created: \(op.stream)/\(op.rowId)")
+        }
         if op.verb == ReplicaOp.Verb.docDelta, let editable = try store.editableDelta(db, stream: op.stream, rowId: op.rowId) {
             op.id = editable
             try store.supersede(db, id: editable, payload: Self.encode(op), preimage: preimage, lane: lane, draft: key)
@@ -1155,6 +1200,11 @@ public actor ReplicaEngine {
         }
     }
 
+    /// Runs the lane to rest: another pass while the last one delivered and the
+    /// lane still owes — a backlog larger than one drain's pass cap goes out in
+    /// full — or while a write arrived meanwhile. A pass that delivered nothing
+    /// has nothing it can send now (its rows are held, or on the other lane's
+    /// wire); only a new write changes that answer, and it is counted.
     private func pushScheduledWrites(_ lane: ReplicaLane) async {
         defer {
             // Identity teardown already canceled and forgot this task. Its
@@ -1164,11 +1214,13 @@ public actor ReplicaEngine {
                 scheduledPushReruns.remove(lane)
             }
         }
+        var delivered = 0
+        var owes = false
         repeat {
             scheduledPushReruns.remove(lane)
-            guard !Task.isCancelled, !isCold(lane), !sealed, binding.store != nil else { return }
+            guard !Task.isCancelled, !isCold(lane), !sealed, let store = binding.store else { return }
             do {
-                _ = try await drain(lane)
+                delivered = try await drain(lane).count
             } catch {
                 // Background delivery has no awaiter. Health reports the error;
                 // the frozen outbox remains durable for an explicit retry.
@@ -1176,10 +1228,17 @@ public actor ReplicaEngine {
                 Log.logger.error("[push] scheduled drain failed — pending entries stay for the next lifecycle: \(error.localizedDescription, privacy: .public)")
                 return
             }
+            do {
+                owes = try await store.pool.read { db in try store.owesWork(db, lane: lane) }
+            } catch {
+                health.record(error, operation: "read the scheduled queue")
+                Log.logger.error("[push] could not read what \(String(describing: lane), privacy: .public) still owes — entries wait for the next lifecycle: \(String(describing: error), privacy: .public)")
+                return
+            }
             // This check and ownership release have no suspension between
             // them: an interleaving write either set this bit or will own a
             // fresh scheduled task. A gated row stays durable without spinning.
-        } while scheduledPushReruns.contains(lane)
+        } while scheduledPushReruns.contains(lane) || (delivered > 0 && owes)
     }
 
     private func isCold(_ lane: ReplicaLane) -> Bool {
@@ -1306,8 +1365,10 @@ public actor ReplicaEngine {
     }
 
     /// The barrier variant: skips while the wire is known-cold — offline
-    /// must not stack timeouts. Network failures are reported through health;
-    /// storage, protocol and cancellation failures propagate. Explicit `drain()` never skips.
+    /// must not stack timeouts. Push and pull are independent: whatever stops
+    /// a push — a dead wire, a refused request, bytes that will not freeze —
+    /// is reported through health and never keeps the pull from receiving.
+    /// Cancellation and a sealed engine propagate. Explicit `drain()` never skips.
     public func drainIfWarm() async throws {
         // Both priorities share the frozen prefix. Once that
         // prefix fails, this barrier must not retry it through another lane.
@@ -1315,10 +1376,9 @@ public actor ReplicaEngine {
             do {
                 _ = try await drain(lane)
             } catch {
-                guard Self.connectionFailed(error), !Task.isCancelled else { throw error }
+                if Task.isCancelled || error is CancellationError { throw error }
+                if case ReplicaError.identityTransitionInProgress = error { throw error }
 
-                // A failed connection does not prevent independently receiving
-                // remote changes. Local bytes stay queued and health reports it.
                 health.record(error, operation: "push before pull")
                 Log.logger.warning("[drain] warm drain of \(String(describing: lane), privacy: .public) failed: \(String(describing: error), privacy: .public)")
                 return
@@ -1659,12 +1719,27 @@ public actor ReplicaEngine {
                                stream: held.stream, rowId: held.rowId, codec: doc.codec, seed: doc.fold)
             }
         } else if let current {
-            let sendable = schema.spec(held.stream)?.pushed.map { pushed in current.filter { pushed.contains($0.key) } } ?? current
-            op = held.serverKnows
-                ? ReplicaOp(id: ReplicaID.ulid(), verb: ReplicaOp.Verb.rowPatch,
-                            stream: held.stream, rowId: held.rowId, data: sendable)
-                : ReplicaOp(id: ReplicaID.ulid(), verb: ReplicaOp.Verb.rowCreate,
-                            stream: held.stream, rowId: held.rowId, type: type, data: sendable)
+            let spec = schema.spec(held.stream)
+            let sendable = spec?.pushed.map { pushed in current.filter { pushed.contains($0.key) } } ?? current
+            if held.serverKnows {
+                // A patch of what moved against the base the hold tracked: a field
+                // the server moved meanwhile, and the device did not, stays the server's.
+                var base: [String: ReplicaValue] = [:]
+                if case .row(_, _, let data) = try ReplicaPreimage.decode(held.preimage) { base = data }
+                var moved = sendable.filter { base[$0.key] != $0.value }
+                guard !moved.isEmpty else {
+                    Log.logger.info("[gate] release \(held.stream, privacy: .public)/\(held.rowId, privacy: .public): nothing owed")
+                    return
+                }
+                for field in spec?.preconditions ?? [] where moved[field] == nil {
+                    moved[field] = current[field]
+                }
+                op = ReplicaOp(id: ReplicaID.ulid(), verb: ReplicaOp.Verb.rowPatch,
+                               stream: held.stream, rowId: held.rowId, data: moved)
+            } else {
+                op = ReplicaOp(id: ReplicaID.ulid(), verb: ReplicaOp.Verb.rowCreate,
+                               stream: held.stream, rowId: held.rowId, type: type, data: sendable)
+            }
         } else {
             op = ReplicaOp(id: ReplicaID.ulid(), verb: ReplicaOp.Verb.rowDelete, stream: held.stream, rowId: held.rowId)
         }
@@ -1778,7 +1853,7 @@ public actor ReplicaEngine {
     }
 
     /// The undo, inside the verdict transaction.
-    private func revert(
+    private nonisolated func revert(
         _ db: Database, op: ReplicaOp, preimage: ReplicaPreimage, store: ReplicaStateStore,
         cascading: Bool = true
     ) throws {
@@ -1808,9 +1883,10 @@ public actor ReplicaEngine {
         case (ReplicaOp.Verb.rowDelete, .row(let shard, let type, let data)),
              (ReplicaOp.Verb.rowCreate, .row(let shard, let type, let data)):
             try store.upsertSnapshot(db, stream: op.stream, rowId: op.rowId, shard: shard, type: type, data: data)
-            if cascading, schema.lane(of: op.stream) == .document {
-                // The row returns but the fold died with the local delete —
-                // only a re-bootstrap can rebuild it.
+            if cascading, schema.lane(of: op.stream) == .document,
+               try store.baseRow(db, stream: op.stream, id: op.rowId)?.fold == nil {
+                // The row returns and its document comes back from the base; a
+                // document the base never held only a re-bootstrap can rebuild.
                 try store.clearCursor(db, shard: schema.spec(op.stream)?.shard ?? shard)
             }
         default:

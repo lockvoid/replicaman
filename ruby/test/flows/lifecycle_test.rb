@@ -67,6 +67,20 @@ class LifecycleTest < ActiveSupport::TestCase
     assert_empty fresh, 'a fresh bootstrap no longer knows the dead board'
   end
 
+  test 'a delete of a lifetime another device already ended is accepted and changes nothing' do
+    push(create_op('b1', 'Shared', id: 'c1'))
+    cursor = pull_checkpoint(DummyReplica, user: @user, cursor: nil)[:cursor]
+    assert_equal [{ id: 'del-a', outcome: 'accepted' }], push({ id: 'del-a', op: 'row.delete', stream: 'boards', row_id: 'b1' })
+    tombstone = ReplicaMan::Snapshot.find_by!(stream: 'boards', row_id: 'b1').slice(:position, :revision)
+
+    second = push({ id: 'del-b', op: 'row.delete', stream: 'boards', row_id: 'b1' })
+
+    assert_equal [{ id: 'del-b', outcome: 'accepted' }], second
+    assert_equal tombstone, ReplicaMan::Snapshot.find_by!(stream: 'boards', row_id: 'b1').slice(:position, :revision)
+    frames = pull_checkpoint(DummyReplica, user: @user, cursor: cursor)[:frames]
+    assert_equal [%w[row.delete b1]], frames.map { it.values_at(:frame, :id) }
+  end
+
   test 'deleting a foreign or unknown board is a rejected verdict' do
     rival = User.create!(id: 'u2', name: 'Rival')
     DummyReplica.document(:boards, 'b9').create(user_id: rival.id) { it.get_map('meta').set('name', 'Theirs') }

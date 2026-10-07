@@ -33,6 +33,18 @@ pub enum ReplicaError {
         stream: String,
         id: String,
     },
+    /// A local write addressed a row id outside the business key: empty,
+    /// over 1024 bytes, or carrying a NUL.
+    InvalidRowId {
+        stream: String,
+        id: String,
+    },
+    /// A single local write larger than one push request may carry.
+    OversizedWrite {
+        stream: String,
+        id: String,
+        bytes: usize,
+    },
     /// A local write addressed a readonly stream — generated code cannot
     /// express this; reaching it means a caller bypassed the verbs.
     ReadonlyStream(String),
@@ -70,6 +82,10 @@ impl fmt::Display for ReplicaError {
             Self::RowExists { stream, id } => write!(f, "row already exists: {stream}/{id}"),
             Self::UnknownRow { stream, id } => write!(f, "unknown row: {stream}/{id}"),
             Self::UnknownDocument { stream, id } => write!(f, "unknown document: {stream}/{id}"),
+            Self::InvalidRowId { stream, id } => write!(f, "invalid row id: {stream}/{id:?}"),
+            Self::OversizedWrite { stream, id, bytes } => {
+                write!(f, "oversized write: {stream}/{id} ({bytes} bytes)")
+            }
             Self::ReadonlyStream(name) => write!(f, "readonly stream: {name}"),
             Self::NoOwner => write!(f, "no owner"),
             Self::LaneMismatch(name) => write!(f, "lane mismatch: {name}"),

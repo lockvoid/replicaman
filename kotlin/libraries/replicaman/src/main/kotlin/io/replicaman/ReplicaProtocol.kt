@@ -13,6 +13,8 @@ internal object ReplicaProtocol {
     const val MAX_OPERATIONS = 100
     const val PAGE_BYTES = 256 * 1024
     const val ENTITY_BYTES = 32 * 1024 * 1024
+    /** One operation's bytes: the request limit less the envelope around a push. */
+    const val OPERATION_BYTES = ENTITY_BYTES - 1024
     const val RESPONSE_BYTES = ENTITY_BYTES + 2 * PAGE_BYTES
 
     fun invalid(message: String): Nothing = throw ReplicaError.Protocol("InvalidResponse", message)

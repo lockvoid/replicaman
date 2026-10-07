@@ -1357,7 +1357,10 @@ async fn a_birth_keeps_its_snapshot_locally_and_journals_only_authored_fields() 
         .await
         .unwrap();
 
-    let row = store.peek_snapshot("notes", "n1").unwrap().expect("the birth is stored");
+    let row = store
+        .peek_snapshot("notes", "n1")
+        .unwrap()
+        .expect("the birth is stored");
     assert_eq!(
         row.data.get("createdAt"),
         Some(&text("2026-09-30T12:00:00Z")),
@@ -1366,5 +1369,132 @@ async fn a_birth_keeps_its_snapshot_locally_and_journals_only_authored_fields() 
     let pending = store.peek_pending().unwrap();
     let op = pending.first().expect("the birth is owed").op().unwrap();
     let journaled: Vec<String> = op.data.unwrap_or_default().keys().cloned().collect();
-    assert_eq!(journaled, vec!["title".to_owned()], "the journal carries only authored fields");
+    assert_eq!(
+        journaled,
+        vec!["title".to_owned()],
+        "the journal carries only authored fields"
+    );
+}
+
+// MARK: - The write door
+
+/// A row id outside the business key — empty, over 1024 bytes, carrying a NUL
+/// — is refused at the door: the journal never carries an address the server
+/// refuses on every retry.
+#[tokio::test]
+async fn a_row_id_outside_the_business_key_is_refused_at_the_door() {
+    let store = store("door-row-id");
+    let engine = engine(store.clone(), StubTransport::new());
+    let long = "x".repeat(1025);
+
+    for id in ["", long.as_str(), "nul\0key"] {
+        let refused = engine
+            .save_row("notes", id, None, &fields(&[("title", text("bad key"))]))
+            .await;
+        assert!(
+            matches!(refused, Err(ReplicaError::InvalidRowId { ref stream, id: ref got }) if stream == "notes" && got == id),
+            "a write with an invalid id went through: {refused:?}"
+        );
+    }
+    assert!(store.all_snapshots().unwrap().is_empty());
+    assert!(store.peek_pending().unwrap().is_empty());
+}
+
+/// A single write larger than one push request may carry is refused at the
+/// door, not journaled into a submission the server rejects forever.
+#[tokio::test]
+async fn a_write_over_the_request_limit_is_refused_at_the_door() {
+    let store = store("door-oversized");
+    let engine = engine(store.clone(), StubTransport::new());
+    let huge = "x".repeat(crate::protocol::OPERATION_BYTES);
+
+    let refused = engine
+        .save_row("notes", "huge", None, &fields(&[("title", text(&huge))]))
+        .await;
+
+    match refused {
+        Err(ReplicaError::OversizedWrite { stream, id, bytes }) => {
+            assert_eq!((stream.as_str(), id.as_str()), ("notes", "huge"));
+            assert!(bytes > crate::protocol::OPERATION_BYTES);
+        }
+        other => panic!("an oversized write went through: {other:?}"),
+    }
+    assert!(store.peek_snapshot("notes", "huge").unwrap().is_none());
+    assert!(store.peek_pending().unwrap().is_empty());
+}
+
+/// A refused delete of a pulled document restores the row AND its document
+/// from the base: the published checkpoint stands, no re-bootstrap.
+#[tokio::test]
+async fn a_refused_delete_of_a_pulled_document_restores_its_document_from_the_base() {
+    let store = store("revert-refused-doc-delete");
+    let transport = StubTransport::new();
+    let engine = engine(store.clone(), transport.clone());
+    transport.queue_pull(
+        "user",
+        ScriptedPull::new(
+            vec![doc_snapshot(
+                "boards",
+                "b1",
+                "stub@1",
+                b"SNAP",
+                fields(&[("name", text("Board"))]),
+            )],
+            "5:",
+            false,
+        ),
+    );
+    engine.pull_once("user").await.unwrap();
+    engine.delete_row("boards", "b1").await.unwrap();
+    assert!(store.peek_doc("boards", "b1").unwrap().is_none());
+
+    reject_all_stub(&transport);
+    engine.drain().await.unwrap();
+
+    assert_eq!(
+        store.peek_snapshot("boards", "b1").unwrap().unwrap().data,
+        fields(&[("name", text("Board"))])
+    );
+    assert_eq!(
+        store.peek_doc("boards", "b1").unwrap().unwrap().fold,
+        b"SNAP".to_vec(),
+        "the document comes back from the base"
+    );
+    assert_eq!(
+        engine.current_cursor("user").await.unwrap().as_deref(),
+        Some("5:"),
+        "no re-bootstrap: the published checkpoint stands"
+    );
+    assert_eq!(store.peek_parked().unwrap().len(), 1);
+}
+
+/// A backlog larger than one drain's pass cap goes out in full: the
+/// scheduled push runs the lane to rest, no further write needed.
+#[tokio::test]
+async fn a_backlog_larger_than_one_pass_cap_is_delivered_without_another_write() {
+    let store = store("scheduled-backlog");
+    let transport = StubTransport::new();
+    let backlog = crate::engine::MAX_DRAIN_PASSES * crate::protocol::MAX_OPERATIONS + 50;
+    let writer = engine(store.clone(), transport.clone());
+    for index in 0..backlog {
+        writer
+            .save_row("notes", &format!("n{index}"), None, &fields(&[("title", text("t"))]))
+            .await
+            .unwrap();
+    }
+    let mut options = options(engine_directory(), transport.clone());
+    options.automatically_push_writes = true;
+    let pusher = engine_with((*store).clone(), OWNER, options);
+
+    pusher.unseal().await;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !store.peek_pending().unwrap().is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the scheduled push stopped before the backlog was delivered"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(transport.pushed_ops().len(), backlog);
 }

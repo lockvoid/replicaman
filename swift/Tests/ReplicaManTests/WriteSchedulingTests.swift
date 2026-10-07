@@ -30,6 +30,27 @@ final class WriteSchedulingTests: XCTestCase {
         }
     }
 
+    /// A backlog larger than one drain's pass cap goes out in full: the
+    /// scheduled push runs the lane to rest, no further write needed.
+    func testABacklogLargerThanOnePassCapIsDeliveredWithoutAnotherWrite() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let backlog = ReplicaEngine.maxDrainPasses * ReplicaEngine.maxOpsPerPush + 50
+        let writer = Fixture.engine(store: store, transport: transport)
+        for index in 0..<backlog {
+            try await writer.saveRow(stream: "notes", id: "n\(index)", type: nil, data: ["title": .string("t")])
+        }
+        let pusher = Fixture.engine(store: store, transport: transport, automaticallyPushWrites: true)
+
+        await pusher.unseal()
+
+        try await eventually(timeout: 30, "the scheduled push stopped before the backlog was delivered") {
+            try store.peekPending().isEmpty
+        }
+        let pushed = await transport.pushedOps().count
+        XCTAssertEqual(pushed, backlog)
+    }
+
     func testCreateStampsTheBoundOwnerAndClockInsideTheEngine() async throws {
         let store = try Fixture.store()
         let transport = StubTransport()

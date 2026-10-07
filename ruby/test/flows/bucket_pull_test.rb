@@ -85,6 +85,46 @@ class BucketPullTest < ActiveSupport::TestCase
     assert_empty ProtocolClient.new(@user).pull.fetch(:frames)
   end
 
+  test 'a row deleted while a bootstrap is in flight reaches the client as a delete' do
+    job = Job.create!(id: 'a', user: @user, state: 'queued')
+    Job.create!(id: 'b', user: @user, state: 'queued')
+    first = @client.pull(limit: 1)
+    assert_equal [%w[row.set a]], frames(first)
+    assert first.fetch(:more)
+
+    job.destroy!
+    round = [first]
+    round << @client.pull(cursor: round.last.fetch(:cursor), limit: 1) while round.last.fetch(:more)
+
+    assert_equal [%w[row.set a], %w[row.set b], %w[row.delete a]], round.flat_map { frames(it) }
+    assert_empty @client.pull(cursor: round.last.fetch(:cursor)).fetch(:frames)
+  end
+
+  test 'a tail its rows have left ends an incremental round at the head' do
+    Job.create!(id: 'a', user: @user, state: 'queued')
+    cursor = @client.pull.fetch(:cursor)
+    Job.create!(id: 'b', user: @user, state: 'queued')
+    ReplicaMan::Snapshot.where(stream: 'jobs', row_id: 'b').update_all(bucket: 'user:elsewhere')
+
+    response = @client.pull(cursor: cursor)
+
+    assert_empty response.fetch(:frames)
+    assert_equal false, response.fetch(:more), 'a vacated position is not a page still to come'
+    assert_equal @client.pull.fetch(:cursor), response.fetch(:cursor)
+  end
+
+  test 'a row cannot be reborn under another owner: its tombstone stays in its bucket' do
+    job = Job.create!(id: 'x', user: @user, state: 'queued')
+    seen = @client.pull
+    job.destroy!
+
+    error = assert_raises(ReplicaMan::Refused) { Job.create!(id: 'x', user: @other, state: 'queued') }
+
+    assert_equal "a row's owner cannot change: jobs/x", error.message
+    assert_nil Job.find_by(id: 'x')
+    assert_equal [%w[row.delete x]], frames(@client.pull(cursor: seen.fetch(:cursor)))
+  end
+
   test 'a write that leaves the replicated row unchanged takes no revision and sends no frame' do
     job = Job.create!(id: 'a', user: @user, state: 'queued')
     initial = @client.pull

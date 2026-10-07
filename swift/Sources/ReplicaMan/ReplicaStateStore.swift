@@ -615,9 +615,18 @@ public final class ReplicaStateStore: Sendable {
         )
     }
 
+    /// An intent that could never leave would stop every intent behind it:
+    /// bytes over the request limit are refused before they are owed.
+    static func admit(_ payload: Data, stream: String, rowId: String) throws {
+        guard payload.count <= ReplicaProtocol.operationBytes else {
+            throw ReplicaError.oversizedWrite(stream: stream, id: rowId, bytes: payload.count)
+        }
+    }
+
     /// A new intent at the end of the queue — owed, or held by its draft.
     func enqueue(_ db: Database, id: String, verb: String, stream: String, rowId: String,
                  payload: Data, preimage: Data? = nil, lane: ReplicaLane = .bulk, draft: String? = nil) throws {
+        try Self.admit(payload, stream: stream, rowId: rowId)
         try db.execute(
             sql: """
                 INSERT INTO intents (id, stream, row_id, state, op, payload, preimage, lane, draft, created_at)
@@ -629,6 +638,14 @@ public final class ReplicaStateStore: Sendable {
                 lane.rawValue, draft, Date().timeIntervalSince1970,
             ]
         )
+    }
+
+    /// The draft that bore the row — the key of its birth still held as a
+    /// draft — or nil when the row was born outside any draft, or sent.
+    func draftBirth(_ db: Database, stream: String, rowId: String) throws -> String? {
+        try String.fetchOne(db, sql: """
+            SELECT draft FROM intents WHERE row_id = ? AND stream = ? AND op = ? AND state = 'draft'
+            """, arguments: [rowId, stream, ReplicaOp.Verb.rowCreate])
     }
 
     /// The document's one editable delta — owed, or held by its draft — the
@@ -643,6 +660,9 @@ public final class ReplicaStateStore: Sendable {
     /// Newer bytes for an editable intent: its rowid (queue place) and
     /// created_at stay, and newer bytes for a draft are still the draft's.
     func supersede(_ db: Database, id: String, payload: Data, preimage: Data?, lane: ReplicaLane, draft: String?) throws {
+        if let address = try Row.fetchOne(db, sql: "SELECT stream, row_id FROM intents WHERE id = ?", arguments: [id]) {
+            try Self.admit(payload, stream: address["stream"], rowId: address["row_id"])
+        }
         try db.execute(
             sql: """
                 UPDATE intents SET payload = ?, preimage = ?, lane = ?,

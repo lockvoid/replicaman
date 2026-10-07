@@ -75,6 +75,7 @@ class StubTransport(dataset: String = ProtocolFixture.DATASET) : FixtureTranspor
     private var pushScript: ((List<ReplicaOp>) -> List<ReplicaVerdict>)? = null
     private var pullFails = false
     private var pushFails = false
+    private var pushFailure: io.replicaman.ReplicaError? = null
     private var pushSuccessBudget: Int? = null
     private var pullDelay: Duration = Duration.ZERO
     private var pushDelay: Duration = Duration.ZERO
@@ -97,6 +98,12 @@ class StubTransport(dataset: String = ProtocolFixture.DATASET) : FixtureTranspor
     suspend fun failPulls(fail: Boolean) = withContext(context) { pullFails = fail }
 
     suspend fun failPushes(fail: Boolean) = withContext(context) { pushFails = fail }
+
+    /**
+     * Every push fails with `throwing` — the server refusing the request (HTTP
+     * 400 for one operation of the batch) or a 5xx, as the HTTP transport reports them.
+     */
+    suspend fun refusePushes(error: io.replicaman.ReplicaError?) = withContext(context) { pushFailure = error }
 
     /**
      * Succeed the first `calls` pushes, then fail — the chunked-drain
@@ -153,6 +160,7 @@ class StubTransport(dataset: String = ProtocolFixture.DATASET) : FixtureTranspor
     override suspend fun push(ops: List<ReplicaOp>): List<ReplicaVerdict> = withContext(context) {
         eventLog.add(Event.Push(ops.map { it.id }))
         if (pushFails) throw io.replicaman.ReplicaError.Transport("push refused (stub)")
+        pushFailure?.let { throw it }
         val budget = pushSuccessBudget
         if (budget != null) {
             if (budget <= 0) {
@@ -198,6 +206,44 @@ class StubCodec : ReplicaCodec {
     }
 
     override fun isEmptyDiff(payload: ByteArray): Boolean = payload.isEmpty()
+}
+
+// MARK: - Causal codec (loro's causal refusal, in miniature)
+
+/**
+ * Folds and payloads are sets of tokens `dN`, and `dN` depends on `d(N-1)`
+ * the way one Loro peer's consecutive changes do. A merge whose result lacks
+ * a dependency refuses with `MissingCausalDeps`, as `LoroReplicaCodec` does.
+ */
+class CausalCodec : ReplicaCodec {
+    override val name: String = "causal@1"
+
+    override fun merge(fold: ByteArray?, payload: ByteArray, reflections: List<ReplicaReflection>): ReplicaMerge {
+        val union = tokens(fold) + tokens(payload)
+        for (token in tokens(payload)) {
+            if (token > 1 && (token - 1) !in union) throw io.replicaman.ReplicaError.MissingCausalDeps
+        }
+        return ReplicaMerge(encode(union), emptyMap())
+    }
+
+    override fun diff(fold: ByteArray, since: ByteArray?): ByteArray = encode(tokens(fold) - tokens(since))
+
+    override fun version(fold: ByteArray): ByteArray = fold
+
+    override fun payloadVersion(payload: ByteArray): ByteArray = payload
+
+    override fun mergeVersions(a: ByteArray?, b: ByteArray): ByteArray = encode(tokens(a) + tokens(b))
+
+    override fun isEmptyDiff(payload: ByteArray): Boolean = tokens(payload).isEmpty()
+
+    companion object {
+        fun tokens(data: ByteArray?): Set<Int> =
+            (data?.decodeToString() ?: "").split(",").mapNotNull { it.drop(1).toIntOrNull() }.toSet()
+
+        fun encode(tokens: Set<Int>): ByteArray = tokens.sorted().joinToString(",") { "d$it" }.toByteArray()
+
+        fun payload(range: IntRange): ByteArray = encode(range.toSet())
+    }
 }
 
 // MARK: - Typed test model (hand-written; codegen's shape in miniature)
@@ -267,6 +313,14 @@ object Fixture {
             ),
             ReplicaStreamSpec("jobs", ReplicaStreamSpec.Lane.ROW, readonly = true, shard = "user"),
             ReplicaStreamSpec("assets", ReplicaStreamSpec.Lane.ROW, shard = "global"),
+        )
+    )
+
+    /** notes: writable row · boards: document under the causal codec. */
+    val causalSchema: ReplicaSchema = ReplicaSchema(
+        streams = listOf(
+            ReplicaStreamSpec("notes", ReplicaStreamSpec.Lane.ROW, shard = "user"),
+            ReplicaStreamSpec("boards", ReplicaStreamSpec.Lane.DOCUMENT, shard = "user", codec = "causal@1"),
         )
     )
 

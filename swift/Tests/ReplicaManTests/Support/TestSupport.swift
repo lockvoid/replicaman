@@ -23,6 +23,7 @@ actor StubTransport: FixtureTransport {
     private var pushScript: (@Sendable ([ReplicaOp]) -> [ReplicaVerdict])?
     private var pullFails = false
     private var pushFails = false
+    private var pushFailure: ReplicaError?
     private var pushSuccessBudget: Int?
     private var pullDelayNanos: UInt64 = 0
     private var pushDelayNanos: UInt64 = 0
@@ -37,6 +38,9 @@ actor StubTransport: FixtureTransport {
 
     func failPulls(_ fail: Bool) { pullFails = fail }
     func failPushes(_ fail: Bool) { pushFails = fail }
+    /// Every push fails with `error` — the server refusing the request (HTTP
+    /// 400 for one operation of the batch) or a 5xx, as the HTTP transport reports them.
+    func failPushes(throwing error: ReplicaError?) { pushFailure = error }
     /// Succeed the first `calls` pushes, then fail — the chunked-drain
     /// mid-flight transport death.
     func failPushesAfter(calls: Int) { pushSuccessBudget = calls }
@@ -76,6 +80,7 @@ actor StubTransport: FixtureTransport {
     func push(_ ops: [ReplicaOp]) async throws -> [ReplicaVerdict] {
         events.append(.push(ids: ops.map(\.id)))
         if pushFails { throw ReplicaError.transport("push refused (stub)") }
+        if let pushFailure { throw pushFailure }
         if let budget = pushSuccessBudget {
             guard budget > 0 else { throw ReplicaError.transport("push budget exhausted (stub)") }
             pushSuccessBudget = budget - 1
@@ -125,6 +130,77 @@ struct StubCodec: ReplicaCodec {
     }
 }
 
+// MARK: - Causal codec (loro's causal refusal, in miniature)
+
+/// Folds and payloads are sets of tokens `dN`, and `dN` depends on `d(N-1)`
+/// the way one Loro peer's consecutive changes do. A merge whose result lacks
+/// a dependency refuses with `missingCausalDeps`, as `LoroReplicaCodec` does.
+struct CausalCodec: ReplicaCodec {
+    let name = "causal@1"
+
+    static func tokens(_ data: Data?) -> Set<Int> {
+        Set(String(decoding: data ?? Data(), as: UTF8.self).split(separator: ",").compactMap { Int($0.dropFirst()) })
+    }
+
+    static func encode(_ tokens: Set<Int>) -> Data {
+        Data(tokens.sorted().map { "d\($0)" }.joined(separator: ",").utf8)
+    }
+
+    static func payload(_ range: ClosedRange<Int>) -> Data {
+        encode(Set(range))
+    }
+
+    func merge(fold: Data?, payload: Data, reflecting reflections: [ReplicaReflection]) throws -> ReplicaMerge {
+        let union = Self.tokens(fold).union(Self.tokens(payload))
+        for token in Self.tokens(payload) where token > 1 && !union.contains(token - 1) {
+            throw ReplicaError.missingCausalDeps
+        }
+        return ReplicaMerge(fold: Self.encode(union), reflected: [:])
+    }
+
+    func diff(fold: Data, since version: Data?) throws -> Data {
+        Self.encode(Self.tokens(fold).subtracting(Self.tokens(version)))
+    }
+
+    func version(fold: Data) throws -> Data { fold }
+    func payloadVersion(_ payload: Data) throws -> Data { payload }
+    func mergeVersions(_ a: Data?, _ b: Data) throws -> Data { Self.encode(Self.tokens(a).union(Self.tokens(b))) }
+    func isEmptyDiff(_ payload: Data) -> Bool { Self.tokens(payload).isEmpty }
+}
+
+/// Opened by sync code, awaited by async code — nothing ever holds a thread of
+/// the cooperative pool waiting on it (a held one starves the engine and the
+/// transport the test is interleaving).
+final class Latch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    var opened: Bool { lock.withLock { isOpen } }
+
+    func open() {
+        lock.lock()
+        isOpen = true
+        let woken = waiters
+        waiters.removeAll()
+        lock.unlock()
+        for waiter in woken { waiter.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            guard !isOpen else {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            waiters.append(continuation)
+            lock.unlock()
+        }
+    }
+}
+
 // MARK: - Typed test model (hand-written; codegen's shape in miniature)
 
 struct TestNote: ReplicaWritableRowModel, Equatable {
@@ -170,6 +246,12 @@ enum Fixture {
             ReplicaStreamSpec(name: "assets", lane: .row, shard: "global"),
         ])
     }
+
+    /// notes: writable row · boards: document under the causal codec.
+    static let causalSchema = ReplicaSchema(streams: [
+        ReplicaStreamSpec(name: "notes", lane: .row, shard: "user"),
+        ReplicaStreamSpec(name: "boards", lane: .document, shard: "user", codec: "causal@1"),
+    ])
 
     static func store(_ name: String = #function, indexes: [ReplicaIndexSpec] = []) throws -> ReplicaStateStore {
         let path = FileManager.default.temporaryDirectory

@@ -14,6 +14,7 @@
 use std::sync::Arc;
 
 use crate::error::ReplicaError;
+use crate::transport::BoxFuture;
 use crate::models::RowStream;
 use crate::tests::support::*;
 use crate::value::{ReplicaFields, ReplicaValue};
@@ -961,4 +962,230 @@ async fn rows_only_engine_with_no_codec_replicates() {
         .unwrap();
     engine.drain().await.unwrap();
     assert_eq!(store.peek_pending().unwrap().len(), 0);
+}
+
+// MARK: - PullRoundTests (3)
+
+fn user_cursors(transport: &StubTransport) -> Vec<Option<String>> {
+    transport
+        .events()
+        .into_iter()
+        .filter_map(|event| match event {
+            WireEvent::Pull { shard, cursor } if shard == "user" => Some(cursor),
+            _ => None,
+        })
+        .collect()
+}
+
+/// History the base cannot absorb means the base is no longer the server's:
+/// the round is forgotten and the shard baselines again, once.
+#[tokio::test]
+async fn history_the_base_cannot_absorb_forgets_the_round_and_the_shard_baselines_again() {
+    let store = store("pull-round-causal-gap");
+    let transport = StubTransport::new();
+    let mut options = options(engine_directory(), transport.clone());
+    options.schema = causal_schema();
+    options.codecs = vec![Arc::new(CausalCodec) as Arc<dyn crate::ReplicaCodec>];
+    let engine = engine_with((*store).clone(), OWNER, options);
+    transport.queue_pull(
+        "user",
+        ScriptedPull::new(
+            vec![doc_snapshot(
+                "boards",
+                "b1",
+                "causal@1",
+                &CausalCodec::payload(1..=3),
+                fields(&[("name", text("Board"))]),
+            )],
+            "c1",
+            false,
+        ),
+    );
+    engine
+        .pull_until_caught_up(Some(&["user".to_owned()]))
+        .await
+        .unwrap();
+    transport.queue_pull(
+        "user",
+        ScriptedPull::new(
+            vec![
+                doc_delta("boards", "b1", 1, "causal@1", &CausalCodec::payload(5..=5)),
+                row_set("boards", "b1", None, fields(&[("name", text("Renamed"))])),
+                note("n2", "two", None),
+            ],
+            "c2",
+            false,
+        ),
+    );
+    transport.queue_pull(
+        "user",
+        ScriptedPull::new(
+            vec![
+                doc_snapshot(
+                    "boards",
+                    "b1",
+                    "causal@1",
+                    &CausalCodec::payload(1..=5),
+                    fields(&[("name", text("Renamed"))]),
+                ),
+                note("n2", "two", None),
+            ],
+            "b1",
+            false,
+        ),
+    );
+
+    let published = engine
+        .pull_until_caught_up(Some(&["user".to_owned()]))
+        .await
+        .unwrap();
+
+    assert_eq!(published, 2, "the baseline publishes");
+    assert_eq!(
+        CausalCodec::tokens(&store.peek_doc("boards", "b1").unwrap().unwrap().fold),
+        (1..=5).collect()
+    );
+    assert_eq!(
+        store.peek_snapshot("notes", "n2").unwrap().unwrap().data["title"],
+        text("two")
+    );
+    assert_eq!(
+        engine.current_cursor("user").await.unwrap().as_deref(),
+        Some("b1")
+    );
+    assert_eq!(
+        user_cursors(&transport),
+        vec![None, Some("c1".to_owned()), None],
+        "the round is forgotten and the shard baselines"
+    );
+    assert!(
+        store.recovery_records(None, 100).unwrap().is_empty(),
+        "nothing was authored, nothing is archived"
+    );
+}
+
+/// A baseline the server cannot answer coherently is forgotten once; the
+/// second one's failure is the caller's to see.
+#[tokio::test]
+async fn a_second_round_the_shard_cannot_publish_reaches_the_caller() {
+    let store = store("pull-round-forgotten-twice");
+    let transport = StubTransport::new();
+    let engine = engine(store.clone(), transport.clone());
+    for index in 0..3 {
+        transport.queue_pull(
+            "user",
+            ScriptedPull::new(vec![note("n1", "one", None)], format!("p1-{index}"), true),
+        );
+        transport.queue_pull(
+            "user",
+            ScriptedPull::new(
+                vec![doc_delta("boards", "b9", 1, "stub@1", b"x")],
+                format!("p2-{index}"),
+                false,
+            ),
+        );
+    }
+
+    let refused = engine.pull_until_caught_up(Some(&["user".to_owned()])).await;
+
+    assert!(
+        matches!(refused, Err(ReplicaError::Protocol { ref code, .. }) if code == "InvalidResponse"),
+        "a baseline that cannot be published twice must fail: {refused:?}"
+    );
+    assert_eq!(
+        transport.pull_count(),
+        4,
+        "one baseline forgotten, the second one's failure thrown"
+    );
+    assert!(
+        store.peek_snapshot("notes", "n1").unwrap().is_none(),
+        "no partial round published"
+    );
+}
+
+/// A frame of a stream the schema does not declare is refused at receipt as
+/// an upgrade, before anything is staged: the checkpoint stands, no round is
+/// forgotten.
+#[tokio::test]
+async fn an_undeclared_stream_is_refused_at_receipt_as_an_upgrade() {
+    let store = store("pull-round-undeclared-stream");
+    let transport = StubTransport::new();
+    let engine = engine(store.clone(), transport.clone());
+    transport.queue_pull(
+        "user",
+        ScriptedPull::new(vec![note("n1", "one", None)], "c1", false),
+    );
+    engine.pull_once("user").await.unwrap();
+    transport.queue_pull(
+        "user",
+        ScriptedPull::new(
+            vec![row_set("ghosts", "g1", None, fields(&[("title", text("boo"))]))],
+            "c2",
+            false,
+        ),
+    );
+
+    let refused = engine.pull_until_caught_up(Some(&["user".to_owned()])).await;
+
+    assert!(
+        matches!(refused, Err(ReplicaError::Protocol { ref code, .. }) if code == "UpgradeRequired"),
+        "{refused:?}"
+    );
+    assert_eq!(transport.pull_count(), 2);
+    assert_eq!(
+        engine.current_cursor("user").await.unwrap().as_deref(),
+        Some("c1")
+    );
+    assert_eq!(
+        store.peek_snapshot("notes", "n1").unwrap().unwrap().data["title"],
+        text("one")
+    );
+}
+
+/// An accepted delete the server shows to a round that started before the
+/// delete was accepted is a settled lifetime, not a lost branch: nothing is
+/// archived.
+#[tokio::test]
+async fn an_accepted_delete_seen_by_a_round_started_before_it_leaves_no_recovery_record() {
+    let store = store("delete-cascade-accepted-delete");
+    let transport = StubTransport::new();
+    let engine = engine(store.clone(), transport.clone());
+    transport.queue_pull(
+        "user",
+        ScriptedPull::new(vec![note("n1", "one", None)], "c1", false),
+    );
+    engine.pull_once("user").await.unwrap();
+
+    let entered = Gate::new();
+    let held = Gate::new();
+    transport.on_pull({
+        let entered = entered.clone();
+        let held = held.clone();
+        move |_shard| {
+            let entered = entered.clone();
+            let held = held.clone();
+            Box::pin(async move {
+                entered.release();
+                held.wait().await;
+            }) as BoxFuture<'static, ()>
+        }
+    });
+    transport.queue_pull(
+        "user",
+        ScriptedPull::new(vec![row_delete("notes", "n1")], "c2", false),
+    );
+    let pull = tokio::spawn({
+        let engine = engine.clone();
+        async move { engine.pull_once("user").await }
+    });
+    entered.wait().await;
+    engine.delete_row("notes", "n1").await.unwrap();
+    engine.drain().await.unwrap();
+    held.release();
+    pull.await.unwrap().unwrap();
+
+    assert!(store.peek_snapshot("notes", "n1").unwrap().is_none());
+    assert!(store.recovery_records(None, 100).unwrap().is_empty());
+    assert!(!store.sync_status().unwrap().has_unsettled_work());
+    assert!(store.peek_pending().unwrap().is_empty());
 }

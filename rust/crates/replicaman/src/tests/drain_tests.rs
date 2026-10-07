@@ -1176,6 +1176,49 @@ async fn empty_journal_pulls_without_a_push() {
     assert_eq!(transport.pull_count(), 1);
 }
 
+/// Push and pull are independent: a push the server refuses — one bad
+/// operation fails the whole request, on every retry — reaches health and
+/// never keeps the shard from receiving.
+#[tokio::test]
+async fn a_push_the_server_refuses_does_not_stop_the_pull() {
+    let store = store("drain-before-pull-refused");
+    let transport = StubTransport::new();
+    let engine = engine(store.clone(), transport.clone());
+    engine.pull_once("user").await.unwrap();
+    engine
+        .save_row("notes", "n1", None, &fields(&[("title", text("mine"))]))
+        .await
+        .unwrap();
+    transport.fail_pushes_with(Some(crate::ReplicaError::Protocol {
+        code: "operation data must be an object".into(),
+        message: "HTTP 400".into(),
+    }));
+    transport.queue_pull(
+        "user",
+        ScriptedPull::new(vec![note("n2", "from the server", None)], "c2", false),
+    );
+
+    let published = engine
+        .pull_until_caught_up(Some(&["user".to_owned()]))
+        .await
+        .unwrap();
+
+    assert_eq!(published, 1);
+    assert_eq!(
+        store.peek_snapshot("notes", "n2").unwrap().unwrap().data["title"],
+        text("from the server")
+    );
+    assert_eq!(
+        store.peek_pending().unwrap().len(),
+        1,
+        "the refused submission stays frozen for its own retry"
+    );
+    assert_eq!(
+        engine.health.last_failure().unwrap().operation,
+        "push before pull"
+    );
+}
+
 // MARK: - ConcurrentDrainTests (1)
 
 /// Two drains racing (the scheduled push meeting an explicit drain) must

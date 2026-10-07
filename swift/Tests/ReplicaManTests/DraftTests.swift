@@ -123,6 +123,72 @@ final class DraftTests: XCTestCase {
         XCTAssertEqual(sent.map(\.rowId), ["n2"], "no delete op either — the server never knew")
     }
 
+    /// A draft can touch rows the server already has: discarding it undoes
+    /// those writes through their preimages, the way a refusal would, so the
+    /// rows stand as they stood before the draft — the edits before it included.
+    func testDiscardRestoresTheServerRowsTheDraftPatchedOrDeleted() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport)
+        await transport.queuePull(shard: "user", .init(frames: [
+            .rowSet(stream: "notes", id: "n1", type: nil, data: ["title": .string("server"), "rank": .string("1")]),
+            .rowSet(stream: "notes", id: "n3", type: nil, data: ["title": .string("doomed")]),
+        ], cursor: "c1", more: false))
+        try await engine.pullOnce()
+        try await engine.saveRow(stream: "notes", id: "n1", type: nil, data: ["rank": .string("2")])
+
+        let draft = try await engine.beginDraft {
+            try await engine.saveRow(stream: "notes", id: "n1", type: nil, data: ["title": .string("edited in a draft")])
+            try await engine.saveRow(stream: "notes", id: "n4", type: nil, data: ["title": .string("born in the draft")])
+            _ = try await engine.deleteRow(stream: "notes", id: "n3")
+        }
+        try await engine.discardDraft(draft)
+
+        XCTAssertEqual(try store.peekSnapshot("notes", "n1")?.data, ["title": .string("server"), "rank": .string("2")],
+                       "the draft's edit is undone; the edit before the draft stands")
+        XCTAssertEqual(try store.peekSnapshot("notes", "n3")?.data, ["title": .string("doomed")], "the deleted row is back")
+        XCTAssertNil(try store.peekSnapshot("notes", "n4"))
+        XCTAssertEqual(try store.peekDrafted().count, 0)
+        XCTAssertEqual(try store.peekPending().map { try $0.op().rowId }, ["n1"], "only the write before the draft is owed")
+        _ = try await engine.drain()
+        let sent = await pushed(transport)
+        XCTAssertEqual(sent.map(\.verb), [ReplicaOp.Verb.rowPatch])
+        XCTAssertEqual(sent.first?.data, ["rank": .string("2")])
+    }
+
+    /// Discarding must give a document back, and only a document the draft
+    /// bore has nothing to give back: a draft edits no other document, and
+    /// deletes none. Nothing is written by a refused write.
+    func testADraftEditsAndDeletesOnlyTheDocumentsItCreated() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport)
+        await transport.queuePull(shard: "user", .init(frames: [
+            .docSnapshot(stream: "boards", id: "b1", codec: "stub@1", snapshot: Data("SEED".utf8), data: ["name": .string("Board")]),
+        ], cursor: "c1", more: false))
+        try await engine.pullOnce()
+
+        let draft = try await engine.beginDraft {
+            try await engine.createDoc(stream: "boards", id: "b2", seed: Data("MINE".utf8), peer: 7)
+            try await engine.recordDocDelta(stream: "boards", id: "b2", payload: Data("+ok".utf8))
+            do {
+                try await engine.recordDocDelta(stream: "boards", id: "b1", payload: Data("+draft".utf8))
+                XCTFail("a draft edited a document it did not create")
+            } catch ReplicaError.draftBlocked {}
+            do {
+                _ = try await engine.deleteRow(stream: "boards", id: "b1")
+                XCTFail("a draft deleted a document it did not create")
+            } catch ReplicaError.draftBlocked {}
+        }
+
+        XCTAssertEqual(try store.peekDoc("boards", "b1")?.fold, Data("SEED".utf8), "the pulled document is untouched")
+        XCTAssertEqual(try store.peekDoc("boards", "b2")?.fold, Data("MINE+ok".utf8))
+        try await engine.discardDraft(draft)
+        XCTAssertNil(try store.peekDoc("boards", "b2"))
+        XCTAssertNotNil(try store.peekDoc("boards", "b1"))
+        XCTAssertEqual(try store.peekPending().count, 0)
+    }
+
     func testDeletingADraftRowCollapsesToNothing() async throws {
         let store = try Fixture.store()
         let transport = StubTransport()

@@ -105,24 +105,34 @@ final class RecoveryStoreTests: XCTestCase {
         XCTAssertEqual(try store.peekSnapshot("notes", "n1")?.data["title"], .string("keep"))
     }
 
-    func testCorruptJournalFailurePropagatesOnEveryPullWithoutAdvancingTheCursor() async throws {
+    /// Push and pull are independent: a journal the engine cannot read fails
+    /// every explicit drain loudly and reaches health from the pull's own
+    /// barrier, while the shard keeps receiving. The damaged bytes stay as they are.
+    func testACorruptJournalFailsTheDrainLoudlyAndNeverKeepsTheShardFromReceiving() async throws {
         let store = try Fixture.store()
         let transport = StubTransport()
         let engine = Fixture.engine(store: store, transport: transport)
         try await engine.saveRow(stream: "notes", id: "n1", type: nil, data: ["title": .string("keep")])
         try await store.pool.write { try $0.execute(sql: "UPDATE intents SET payload = '{damaged'") }
+        await transport.queuePull(shard: "user", .init(frames: [Fixture.note("n2", title: "from the server")], cursor: "c1", more: false))
+
         for _ in 0..<2 {
             do {
-                _ = try await engine.pullOnce(shard: "user")
-                XCTFail("corrupt authoring was hidden by the warm-drain path")
+                _ = try await engine.drain()
+                XCTFail("corrupt authoring must fail an explicit drain")
             } catch ReplicaError.storage {
                 // This is the refusal under test; any other failure propagates.
             }
         }
+        let published = try await engine.pullOnce(shard: "user")
+
+        XCTAssertEqual(published, 1)
+        XCTAssertEqual(try store.peekSnapshot("notes", "n2")?.data["title"], .string("from the server"))
         let pulls = await transport.pullCount
-        XCTAssertEqual(pulls, 0)
+        XCTAssertEqual(pulls, 1)
         let cursor = try await engine.currentCursor(shard: "user")
-        XCTAssertNil(cursor)
+        XCTAssertEqual(cursor, "c1")
+        XCTAssertEqual(engine.health.lastFailure?.operation, "push before pull")
         let payload = try await store.pool.read { try String.fetchOne($0, sql: "SELECT payload FROM intents") }
         XCTAssertEqual(payload, "{damaged")
     }

@@ -157,41 +157,29 @@ class PullTest < ActiveSupport::TestCase
     assert_equal 'blue', doc.get_map('meta').get('color'), 'the baseline carries the edit'
   end
 
-  test 'a bootstrap cursor stays a bootstrap until its last page' do
+  test 'a bootstrap cursor stays a bootstrap, remembering where it started, until its last page' do
     create_board('b1', @user, 'Plans')
     Job.create!(id: 'j1', user: @user, state: 'queued')
     client = ProtocolClient.new(@user)
+    buckets = DummyReplica.buckets(@user, 'user')
 
     first = client.pull(cursor: nil, limit: 1)
     assert first.fetch(:more)
-    assert ReplicaMan::Cursor.bootstrap?(first.fetch(:cursor)), 'the round is not over'
+    started = ReplicaMan::Cursor.started(first.fetch(:cursor), buckets)
+    assert_equal ReplicaMan::Buckets.heads(DummyReplica.namespace, buckets), started, 'the round is not over'
 
     last = client.checkpoint(cursor: first.fetch(:cursor), limit: 10)
-    refute ReplicaMan::Cursor.bootstrap?(last.fetch(:cursor)), 'the published cursor reads incrementally from here'
+    assert_nil ReplicaMan::Cursor.started(last.fetch(:cursor), buckets), 'the published cursor reads incrementally from here'
   end
 
-  test 'a bootstrap reads live rows only and still reaches the bucket head' do
+  test 'a bootstrap skips the tombstones that preceded it and still reaches the bucket head' do
     Job.create!(id: 'j1', user: @user, state: 'queued')
     Job.create!(id: 'j2', user: @user, state: 'queued').destroy!
 
-    reads = snapshot_reads { @result = pull_checkpoint(DummyReplica, user: @user, cursor: nil) }
+    result = pull_checkpoint(DummyReplica, user: @user, cursor: nil)
 
-    refute_empty reads
-    assert reads.all? { it.include?('"deleted_at" IS NULL') }, reads.join("\n")
-    assert_empty pull_checkpoint(DummyReplica, user: @user, cursor: @result[:cursor])[:frames],
+    assert_equal ['j1'], result[:frames].map { it[:id] }
+    assert_empty pull_checkpoint(DummyReplica, user: @user, cursor: result[:cursor])[:frames],
                  'the tombstone tail is behind the returned cursor'
-  end
-
-  private
-
-  def snapshot_reads
-    reads = []
-    subscriber = ActiveSupport::Notifications.subscribe('sql.active_record') do |*, payload|
-      reads << payload[:sql] if payload[:name] == 'ReplicaMan::Snapshot Load'
-    end
-    yield
-    reads
-  ensure
-    ActiveSupport::Notifications.unsubscribe(subscriber)
   end
 end

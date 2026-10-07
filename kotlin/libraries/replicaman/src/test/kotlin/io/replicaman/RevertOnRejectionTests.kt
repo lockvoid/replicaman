@@ -12,6 +12,7 @@ import io.replicaman.support.peekDoc
 import io.replicaman.support.peekParked
 import io.replicaman.support.peekPending
 import io.replicaman.support.peekSnapshot
+import kotlin.test.assertContentEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -206,6 +207,31 @@ class RevertOnRejectionTests : ReplicaTestCase() {
         val restored = store.peekSnapshot("notes", "n1")
         assertNotNull(restored, "a refused delete resurrects the row")
         assertEquals(before, restored, "byte-identical prior state — type and data alike")
+    }
+
+    /**
+     * A refused delete of a pulled document brings the row back WITH its document, from the base
+     * the pull left — never through a re-bootstrap.
+     */
+    @Test
+    fun aRefusedDeleteOfAPulledDocumentRestoresItsDocumentFromTheBase() = runTest {
+        val store = Fixture.store()
+        val transport = StubTransport()
+        val engine = Fixture.engine(store = store, transport = transport)
+        transport.queuePull("user", ReplicaPullResponse(frames = listOf(
+            ReplicaFrame.DocSnapshot("boards", "b1", "stub@1", "SNAP".toByteArray(), mapOf("name" to ReplicaValue.Str("Board"))),
+        ), cursor = "5:", more = false))
+        engine.pullOnce("user")
+        engine.deleteRow("boards", "b1")
+        assertNull(store.peekDoc("boards", "b1"))
+
+        rejectAll(transport)
+        engine.drain()
+
+        assertEquals(mapOf("name" to ReplicaValue.Str("Board")), store.peekSnapshot("boards", "b1")?.data)
+        assertContentEquals("SNAP".toByteArray(), store.peekDoc("boards", "b1")?.fold, "the document comes back from the base")
+        assertEquals("5:", engine.currentCursor("user"), "no re-bootstrap: the published checkpoint stands")
+        assertEquals(1, store.peekParked().size)
     }
 
     /** KILL: skip `deleteDoc` in the create revert — the fold outlives its refused birth. */

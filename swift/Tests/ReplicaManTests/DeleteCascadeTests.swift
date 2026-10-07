@@ -123,6 +123,36 @@ final class DeleteCascadeTests: XCTestCase {
         XCTAssertNil(try store.peekSnapshot("notes", "n1"), "an answer for a removed row does not bring it back")
     }
 
+    /// A doorbell's round started before this device's own delete was
+    /// accepted, and carries the tombstone. The accepted intent is the server's
+    /// state waiting for a round, not authoring: there is nothing to archive.
+    func testAnAcceptedDeleteSeenByARoundStartedBeforeItLeavesNoRecoveryRecord() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport)
+        await transport.queuePull(shard: "user", ReplicaPullResponse(frames: [Fixture.note("n1", title: "one")], cursor: "c1", more: false))
+        try await engine.pullOnce()
+
+        let entered = Latch()
+        let gate = Latch()
+        await transport.onPull { _ in
+            entered.open()
+            await gate.wait()
+        }
+        await transport.queuePull(shard: "user", ReplicaPullResponse(frames: [.rowDelete(stream: "notes", id: "n1")], cursor: "c2", more: false))
+        let pull = Task { try await engine.pullOnce() }
+        await entered.wait()
+        try await engine.deleteRow(stream: "notes", id: "n1")
+        _ = try await engine.drain()
+        gate.open()
+        _ = try await pull.value
+
+        XCTAssertNil(try store.peekSnapshot("notes", "n1"))
+        XCTAssertEqual(try store.recoveryRecords().count, 0)
+        XCTAssertFalse(try store.syncStatus().hasUnsettledWork)
+        XCTAssertEqual(try store.peekPending().count, 0)
+    }
+
     /// Another device gave the address a new life while this device's patch of
     /// the old one was frozen. The round that shows the new life archives the
     /// old branch and drops what was still editable — never the frozen intent:

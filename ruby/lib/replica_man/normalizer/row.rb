@@ -19,11 +19,10 @@ module ReplicaMan
 
       def delete(replica, stream, op)
         record = stream.locate(op.row_id, lock: true)
-        return if record.nil?
-
-        stream.member!(op.user, record)
+        subject = record || Snapshot.find_by!(namespace: replica.namespace, stream: stream.stream_name, row_id: op.row_id)
+        stream.member!(op.user, subject)
         refuse!(op)
-        destroy_row(stream, record)
+        record ? destroy_row(stream, record) : Capture.record_deletion(stream, op.row_id)
       end
 
       def destroy_row(stream, record)

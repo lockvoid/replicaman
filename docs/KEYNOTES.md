@@ -34,7 +34,7 @@ Later edits become later work. They cannot mutate a submission already sent over
 
 ## 4. Server decisions are durable
 
-Rails commits the domain change, its capture and the operation's verdict together. A declared domain refusal rolls back that action and records its refusal. An infrastructure failure rolls back the whole request, and the client retries the same operations.
+Rails commits the domain change, its capture and the operation's verdict together. A declared domain refusal rolls back that action and records its refusal; so does a failure the same operation would meet again (invalid data, a violated constraint, an exception in the handler). A transient failure rolls back the whole request, and the client retries the same operations.
 
 The client validates the complete reply before changing local delivery state: a missing, duplicate or foreign verdict acknowledges nothing.
 

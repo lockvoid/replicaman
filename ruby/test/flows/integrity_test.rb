@@ -38,6 +38,22 @@ class IntegrityTest < ActiveSupport::TestCase
     refute_equal initial.fetch(:digest), verify(newer).fetch(:digest)
   end
 
+  test 'a compaction keeps a caught-up client verifiable' do
+    DummyReplica.document(:boards, 'b1').create(user_id: @user.id) { it.get_map('meta').set('name', 'Plans') }
+    DummyReplica.document(:boards, 'b1').edit { it.get_map('meta').set('name', 'Edited') }
+    cursor = @client.pull.fetch(:cursor)
+
+    DummyReplica.document(:boards, 'b1').compact
+
+    error = assert_raises(ReplicaMan::Protocol::Error) { verify(cursor) }
+    assert_equal 'CursorBehind', error.code, 'the compaction moved the head: the client pulls first'
+    response = @client.pull(cursor: cursor)
+    assert_equal ['doc.snapshot'], response.fetch(:frames).map { it.fetch(:frame) }
+    frame = response.fetch(:frames).first
+    expected = ReplicaMan::Integrity.digest([['boards', 'b1', frame.fetch(:incarnation), frame.fetch(:revision)]])
+    assert_equal expected.fetch(:digest), verify(response.fetch(:cursor)).fetch(:digest)
+  end
+
   test 'verification refuses a foreign cursor and an unknown shard' do
     Job.create!(id: 'private-job', user: @user, state: 'queued')
     cursor = @client.pull.fetch(:cursor)

@@ -1,10 +1,12 @@
 package io.replicaman
 
+import io.replicaman.support.CausalCodec
 import io.replicaman.support.Fixture
 import io.replicaman.support.ReplicaTestCase
 import io.replicaman.support.StubCodec
 import io.replicaman.support.StubTransport
 import io.replicaman.support.allSnapshots
+import io.replicaman.support.peekDoc
 import io.replicaman.support.peekPending
 import io.replicaman.support.peekSnapshot
 import io.replicaman.testing.ProtocolFixture
@@ -48,6 +50,80 @@ class PullRoundTests : ReplicaTestCase() {
 
         assertEquals(listOf(ReplicaValue.Null, ReplicaValue.Str(ProtocolFixture.DATASET)),
             transport.protocolFixture.requests(ReplicaEndpoint.PULL).map { it["dataset"] })
+    }
+
+    /**
+     * The server folded a document's history and shipped the fold's own delta to nobody; the
+     * device's base lacks what the next delta stands on. That history cannot be absorbed and only
+     * a baseline replaces the base: the round is forgotten and the shard baselines again, once.
+     */
+    @Test fun historyTheBaseCannotAbsorbForgetsTheRoundAndTheShardBaselinesAgain() = runBlocking<Unit> {
+        val store = Fixture.store()
+        val transport = StubTransport()
+        val engine = Fixture.engine(store = store, transport = transport, schema = Fixture.causalSchema, codecs = listOf(CausalCodec()))
+        transport.queuePull("user", ReplicaPullResponse(listOf(
+            ReplicaFrame.DocSnapshot("boards", "b1", "causal@1", CausalCodec.payload(1..3), mapOf("name" to ReplicaValue.Str("Board"))),
+        ), "c1", more = false))
+        engine.pullUntilCaughtUp(listOf("user"))
+        transport.queuePull("user", ReplicaPullResponse(listOf(
+            ReplicaFrame.DocDelta("boards", "b1", 1, "causal@1", CausalCodec.payload(5..5)),
+            ReplicaFrame.RowSet("boards", "b1", null, mapOf("name" to ReplicaValue.Str("Renamed"))),
+            Fixture.note("n2", "two"),
+        ), "c2", more = false))
+        transport.queuePull("user", ReplicaPullResponse(listOf(
+            ReplicaFrame.DocSnapshot("boards", "b1", "causal@1", CausalCodec.payload(1..5), mapOf("name" to ReplicaValue.Str("Renamed"))),
+            Fixture.note("n2", "two"),
+        ), "b1", more = false))
+
+        val published = engine.pullUntilCaughtUp(listOf("user"))
+
+        assertEquals(2, published, "the baseline publishes")
+        assertEquals((1..5).toSet(), CausalCodec.tokens(store.peekDoc("boards", "b1")?.fold))
+        assertEquals("two", store.peekSnapshot("notes", "n2")?.data?.get("title")?.string)
+        assertEquals("b1", engine.currentCursor())
+        assertEquals(listOf(null, "c1", null), pullCursors(transport), "the round is forgotten and the shard baselines")
+        assertEquals(0, store.recoveryRecords().size, "nothing was authored, nothing is archived")
+    }
+
+    /** A second round the shard cannot publish, in the same call, is the server's fault: its failure reaches the caller. */
+    @Test fun aSecondRoundTheShardCannotPublishReachesTheCaller() = runBlocking<Unit> {
+        val store = Fixture.store()
+        val transport = StubTransport()
+        val engine = Fixture.engine(store = store, transport = transport)
+        repeat(3) { index ->
+            transport.queuePull("user", ReplicaPullResponse(listOf(Fixture.note("n1", "one")), "p1-$index", more = true))
+            transport.queuePull("user", ReplicaPullResponse(listOf(
+                ReplicaFrame.DocDelta("boards", "b9", 1, "stub@1", "x".toByteArray()),
+            ), "p2-$index", more = false))
+        }
+
+        val error = assertFailsWith<ReplicaError.Protocol> { engine.pullUntilCaughtUp(listOf("user")) }
+
+        assertEquals("InvalidResponse", error.code)
+        assertEquals(4, transport.pullCount(), "one baseline forgotten, the second one's failure thrown")
+        assertNull(store.peekSnapshot("notes", "n1"), "no partial round published")
+    }
+
+    /**
+     * A frame of a stream this build does not declare is refused as it arrives — UpgradeRequired,
+     * once — never staged, and never turned into baseline after baseline by the forgetting of a round.
+     */
+    @Test fun aPulledFrameOfAnUndeclaredStreamIsRefusedAtReceipt() = runBlocking<Unit> {
+        val store = Fixture.store()
+        val transport = StubTransport()
+        val engine = Fixture.engine(store = store, transport = transport)
+        repeat(3) { index ->
+            transport.queuePull("user", ReplicaPullResponse(listOf(Fixture.note("n1", "one")), "p1-$index", more = true))
+            transport.queuePull("user", ReplicaPullResponse(listOf(
+                ReplicaFrame.RowSet("ghosts", "g1", null, emptyMap()),
+            ), "p2-$index", more = false))
+        }
+
+        val error = assertFailsWith<ReplicaError.Protocol> { engine.pullUntilCaughtUp(listOf("user")) }
+
+        assertEquals("UpgradeRequired", error.code)
+        assertEquals(2, transport.pullCount(), "the page naming the stream is the last request")
+        assertNull(store.peekSnapshot("notes", "n1"))
     }
 
     /**

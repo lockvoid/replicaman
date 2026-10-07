@@ -493,3 +493,64 @@ async fn held_recreation_keeps_its_predecessor_across_store_reopen() {
     assert!(birth.replaces.is_some());
     reopened.try_close().await.unwrap();
 }
+
+/// A held row takes the server's value for every field the device did not
+/// move and leaves as a patch of exactly what it moved: a field the server
+/// moved meanwhile stays the server's.
+#[tokio::test]
+async fn a_released_patch_leaves_a_field_the_server_moved_alone() {
+    let directory = temp_directory("gate-server-moved");
+    let wire = StubTransport::new();
+    let gate = Gate::new(Some("notes"));
+    let engine = ReplicaEngine::new(options(&directory, wire.clone(), gate.clone()));
+    engine.open(42).await.unwrap();
+    wire.queue_pull(
+        "user",
+        ScriptedPull::new(
+            vec![row_set("notes", "n1", None, fields(&[("title", text("a")), ("rank", text("1"))]))],
+            "c1",
+            false,
+        ),
+    );
+    engine.pull_once("user").await.unwrap();
+    engine
+        .save_row(
+            "notes",
+            "n1",
+            None,
+            &fields(&[("title", text("b")), ("blob", text("k1"))]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(engine.held_rows().unwrap().len(), 1);
+    wire.queue_pull(
+        "user",
+        ScriptedPull::new(
+            vec![row_set("notes", "n1", None, fields(&[("title", text("a")), ("rank", text("2"))]))],
+            "c2",
+            false,
+        ),
+    );
+    engine.pull_once("user").await.unwrap();
+    let row = engine.store().unwrap().peek_snapshot("notes", "n1").unwrap().unwrap();
+    assert_eq!(
+        row.data,
+        fields(&[("title", text("b")), ("blob", text("k1")), ("rank", text("2"))]),
+        "the held row keeps what the device moved and shows what the server moved"
+    );
+
+    gate.open.store(true, Ordering::SeqCst);
+    engine.refresh_sync_gates(None).await.unwrap();
+    engine.drain().await.unwrap();
+
+    let sent = wire.pushed_ops();
+    assert_eq!(
+        sent.iter().map(|op| op.verb.as_str()).collect::<Vec<_>>(),
+        [verb::ROW_PATCH]
+    );
+    assert_eq!(
+        sent[0].data,
+        Some(fields(&[("title", text("b")), ("blob", text("k1"))])),
+        "rank 2 is the server's; the device never touched it"
+    );
+}

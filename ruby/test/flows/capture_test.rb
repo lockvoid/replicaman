@@ -6,6 +6,21 @@ class CaptureTest < ActiveSupport::TestCase
     @board = create_board!(id: 'b1', user: @user, name: 'Plans')
   end
 
+  test 'a row that left its replica and returns is reborn, not resurrected' do
+    item = Items::TextItem.create!(id: 'i1', board: @board, rank: 'a', body: 'here')
+    born = ReplicaMan::Snapshot.find_by!(stream: 'items', row_id: 'i1').incarnation
+    DummyReplica.transaction { Board.where(id: 'b1').delete_all }
+    DummyReplica.transaction { item.update_column(:rank, 'b') }
+    assert ReplicaMan::Snapshot.find_by!(stream: 'items', row_id: 'i1').deleted_at, 'an ownerless row leaves like a deletion'
+
+    uncaptured_fixture(Board) { Board.insert_all([{ id: 'b1', user_id: 'u1', name: 'Plans' }]) }
+    DummyReplica.transaction { item.update_column(:rank, 'c') }
+
+    reborn = ReplicaMan::Snapshot.find_by!(stream: 'items', row_id: 'i1')
+    assert_nil reborn.deleted_at
+    refute_equal born, reborn.incarnation
+  end
+
   test 'a flush upserts its rows in one canonical order, whatever order they were captured in' do
     upserted = []
     subscriber = ActiveSupport::Notifications.subscribe('sql.active_record') do |*, payload|

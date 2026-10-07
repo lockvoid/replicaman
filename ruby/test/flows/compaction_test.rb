@@ -85,6 +85,62 @@ class CompactionTest < ActiveSupport::TestCase
     end
   end
 
+  test 'a cursor caught up to the delta before the auto-fold is handed the document' do
+    with_compact_every(4) do
+      %w[d1 d2 d3].each_with_index { |name, index| push_edit(@base, id: name) { it.get_map('meta').set("k#{index}", index) } }
+      caught_up = pull_checkpoint(DummyReplica, user: @user, cursor: nil)
+      baseline = caught_up[:frames].find { it[:frame] == 'doc.snapshot' }
+      client = Loro::Doc.from_snapshot(Base64.strict_decode64(baseline[:snapshot]), peer_id: 99)
+
+      push_edit(@base, id: 'd4') { it.get_map('meta').set('k3', 3) }
+      assert_equal 0, ReplicaMan::Delta.where(stream: 'boards', row_id: 'b1').count, 'the 4th accept auto-folded'
+
+      late = pull_checkpoint(DummyReplica, user: @user, cursor: caught_up[:cursor])
+      assert_equal %w[doc.snapshot], late[:frames].map { it[:frame] }, 'the fold is a new baseline for every cursor behind it'
+      client.import(Base64.strict_decode64(late[:frames].first[:snapshot]))
+      assert_equal 3, client.get_map('meta').get('k3'), 'the folding delta reaches the caught-up device'
+
+      push_edit(@base, id: 'd5') { it.get_map('meta').set('k4', 4) }
+      after = pull_checkpoint(DummyReplica, user: @user, cursor: late[:cursor])
+      assert_equal %w[doc.delta row.set], after[:frames].map { it[:frame] }
+      refute client.import(Base64.strict_decode64(after[:frames].first[:payload])).fetch(:pending), 'the next delta merges into that baseline'
+      assert_equal 4, client.get_map('meta').get('k4')
+    end
+  end
+
+  test 'a server edit that auto-folds without moving the projection still moves the fold axis' do
+    with_compact_every(4) do
+      3.times { |index| DummyReplica.document(:boards, 'b1').edit { it.get_map('meta').set("s#{index}", index) } }
+      caught_up = pull_checkpoint(DummyReplica, user: @user, cursor: nil)
+      position = ReplicaMan::Snapshot.find_by!(stream: 'boards', row_id: 'b1').position
+
+      DummyReplica.document(:boards, 'b1').edit { it.get_map('meta').set('s3', 3) }
+
+      assert_equal 0, ReplicaMan::Delta.where(stream: 'boards', row_id: 'b1').count
+      snapshot = ReplicaMan::Snapshot.find_by!(stream: 'boards', row_id: 'b1')
+      assert_operator snapshot.position, :>, position, 'the fold takes a position though the projection is unchanged'
+      assert_equal snapshot.position, snapshot.document_position, 'and that position is the fold axis'
+      late = pull_checkpoint(DummyReplica, user: @user, cursor: caught_up[:cursor])
+      assert_equal %w[doc.snapshot], late[:frames].map { it[:frame] }
+      assert_equal 3, Loro::Doc.from_snapshot(Base64.strict_decode64(late[:frames].first[:snapshot])).get_map('meta').get('s3')
+    end
+  end
+
+  test 'an explicit compaction takes a position: every cursor behind it is handed the document' do
+    push_edit(@base, id: 'd1') { it.get_map('meta').set('a', 1) }
+    caught_up = pull_checkpoint(DummyReplica, user: @user, cursor: nil)
+    before = ReplicaMan::Snapshot.find_by!(stream: 'boards', row_id: 'b1')
+
+    DummyReplica.document(:boards, 'b1').compact
+
+    after = ReplicaMan::Snapshot.find_by!(stream: 'boards', row_id: 'b1')
+    assert_operator after.position, :>, before.position
+    assert_equal after.position, after.document_position
+    late = pull_checkpoint(DummyReplica, user: @user, cursor: caught_up[:cursor])
+    assert_equal %w[doc.snapshot], late[:frames].map { it[:frame] }
+    assert_equal after.revision.to_s, late[:frames].first[:revision], 'the frame carries the revision the compaction took'
+  end
+
   test 'a late pusher after the auto-fold still merges — the fold keeps FULL history' do
     offline = Loro::Doc.from_snapshot(@base.export_snapshot, peer_id: 99)
     ancient_version = offline.version_vector

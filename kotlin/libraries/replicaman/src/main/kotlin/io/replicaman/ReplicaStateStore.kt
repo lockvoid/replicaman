@@ -783,6 +783,14 @@ public class ReplicaStateStore(
     private fun entries(db: SQLiteConnection, condition: String, arguments: List<Any?> = emptyList()): List<JournalRow> =
         db.query("SELECT $journalColumns FROM intents WHERE $condition ORDER BY rowid", arguments) { journalRow(it) }
 
+    /**
+     * An intent that could never leave would stop every intent behind it:
+     * bytes over the request limit are refused before they are owed.
+     */
+    internal fun admit(payload: ByteArray, stream: String, rowId: String) {
+        if (payload.size > ReplicaProtocol.OPERATION_BYTES) throw ReplicaError.OversizedWrite(stream, rowId, payload.size)
+    }
+
     /** A new intent at the end of the queue: owed, or held back by its draft. */
     internal fun enqueue(
         db: SQLiteConnection,
@@ -795,6 +803,7 @@ public class ReplicaStateStore(
         lane: ReplicaLane = ReplicaLane.BULK,
         draft: String? = null,
     ) {
+        admit(payload, stream, rowId)
         db.exec(
             """
             INSERT INTO intents (id, stream, row_id, state, op, payload, preimage, lane, draft, created_at)
@@ -822,7 +831,16 @@ public class ReplicaStateStore(
             listOf(rowId, stream, ReplicaOp.Verb.DOC_DELTA, draft)
         )
 
+    /** The draft that bore the row — the key of its birth still held as a draft — or null. */
+    internal fun draftBirth(db: SQLiteConnection, stream: String, rowId: String): String? =
+        db.queryString(
+            "SELECT draft FROM intents WHERE row_id = ? AND stream = ? AND op = ? AND state = 'draft'",
+            listOf(rowId, stream, ReplicaOp.Verb.ROW_CREATE)
+        )
+
     internal fun supersede(db: SQLiteConnection, id: String, payload: ByteArray, preimage: ByteArray?, lane: ReplicaLane) {
+        db.queryOne("SELECT stream, row_id FROM intents WHERE id = ?", listOf(id)) { it.getText(0) to it.getText(1) }
+            ?.let { (stream, rowId) -> admit(payload, stream, rowId) }
         db.exec(
             "UPDATE intents SET payload = ?, preimage = ?, lane = ? WHERE id = ?",
             listOf(payload.toString(Charsets.UTF_8), preimage?.toString(Charsets.UTF_8), lane.rawValue, id)

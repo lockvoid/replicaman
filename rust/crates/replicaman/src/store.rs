@@ -622,6 +622,13 @@ impl ReplicaStateStore {
         preimage: Option<&[u8]>,
         lane: ReplicaLane,
     ) -> ReplicaResult<()> {
+        if payload.len() > crate::protocol::OPERATION_BYTES {
+            return Err(ReplicaError::OversizedWrite {
+                stream: stream.to_owned(),
+                id: row_id.to_owned(),
+                bytes: payload.len(),
+            });
+        }
         let written = ctx.tx.execute(
             "INSERT INTO intents (id, stream, row_id, state, op, payload, preimage, lane, created_at) \
              VALUES (?, ?, ?, 'owed', ?, ?, ?, ?, ?) \
@@ -968,7 +975,11 @@ impl ReplicaStateStore {
             .collect::<rusqlite::Result<_>>()?;
         let mut ids = Vec::new();
         for (id, payload) in rows {
-            if ReplicaOp::from_json(payload.as_bytes())?.incarnation.as_deref() == incarnation {
+            if ReplicaOp::from_json(payload.as_bytes())?
+                .incarnation
+                .as_deref()
+                == incarnation
+            {
                 ids.push(id);
             }
         }

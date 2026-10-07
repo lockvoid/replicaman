@@ -9,10 +9,12 @@ import io.replicaman.support.Fixture
 import io.replicaman.support.ReplicaTestCase
 import io.replicaman.support.StubTransport
 import io.replicaman.support.TestNote
+import io.replicaman.support.allSnapshots
 import io.replicaman.support.peekDoc
 import io.replicaman.support.peekPending
 import io.replicaman.support.peekSnapshot
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -25,6 +27,45 @@ import kotlin.test.fail
  * the same transaction. Deletes discharge what the row still owed.
  */
 class SaveDeleteTests : ReplicaTestCase() {
+
+    /**
+     * The server would refuse the whole push carrying this id, on every retry:
+     * the id is refused at the door, and nothing is written.
+     */
+    @Test
+    fun aRowIdOutsideTheBusinessKeyIsRefusedAtTheDoor() = runTest {
+        val store = Fixture.store()
+        val engine = Fixture.engine(store = store, transport = StubTransport())
+
+        for (id in listOf("", "x".repeat(1025), "nul\u0000key")) {
+            val error = assertFailsWith<ReplicaError.InvalidRowId> {
+                engine.saveRow("notes", id, null, mapOf("title" to ReplicaValue.Str("bad key")))
+            }
+            assertEquals(ReplicaError.InvalidRowId("notes", id), error)
+        }
+        assertEquals(emptyList(), store.allSnapshots())
+        assertEquals(0, store.peekPending().size)
+    }
+
+    /**
+     * An intent over the request limit could never leave and would stop every
+     * intent behind it: it is refused at the door, and nothing is written.
+     */
+    @Test
+    fun aWriteOverTheRequestLimitIsRefusedAtTheDoor() = runTest {
+        val store = Fixture.store()
+        val engine = Fixture.engine(store = store, transport = StubTransport())
+        val huge = "x".repeat(ReplicaProtocol.OPERATION_BYTES)
+
+        val error = assertFailsWith<ReplicaError.OversizedWrite> {
+            engine.saveRow("notes", "huge", null, mapOf("title" to ReplicaValue.Str(huge)))
+        }
+
+        assertEquals("notes" to "huge", error.stream to error.id)
+        assertTrue(error.bytes > ReplicaProtocol.OPERATION_BYTES)
+        assertNull(store.peekSnapshot("notes", "huge"))
+        assertEquals(0, store.peekPending().size)
+    }
 
     /**
      * `update` speaks to a row that IS there; a missing id is the caller's

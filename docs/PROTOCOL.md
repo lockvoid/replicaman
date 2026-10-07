@@ -74,9 +74,14 @@ Frames arrive in position order:
 - `doc.delta {stream, id, incarnation, seq, codec, payload}` — history the client
   lacks, always followed in the same response by the document's `row.set`.
 
-A document born, reborn or compacted after the cursor arrives as `doc.snapshot`.
-A baseline pull (`cursor` null, `reset: true`) omits deletions; on publishing it
-the client replaces the shard's base.
+A document born, reborn or compacted after the cursor arrives as `doc.snapshot`:
+compaction is a captured change that takes a position, so a client whose cursor
+had reached the folded deltas receives the new baseline instead of history its
+base cannot verify. A baseline round (first request with `cursor` null,
+`reset: true`) omits the deletions that precede it; a deletion committed while the
+round is paging arrives on a later page, so a baseline's cursor carries the bucket
+heads the round started from. On publishing a baseline the client replaces the
+shard's base.
 
 Each response reads one database snapshot. `more: true` means the bucket heads were
 ahead of the returned cursor: the client stages the frames and continues with the
@@ -84,7 +89,13 @@ new cursor. It publishes only a round whose last response says `more: false`, in
 SQLite transaction: the staged frames in order, the rebased local authoring, the
 cursor, and the removal of accepted overlays the round covers. A round survives
 process death through its staged pages. `CursorInvalid` (malformed, foreign or
-ahead of the server) discards staging and starts a baseline round.
+ahead of the server) discards staging and starts a baseline round. A round the
+client cannot publish is forgotten rather than resumed: a staged baseline the
+server no longer answers coherently, or incremental history the base cannot
+absorb (a delta without its baseline, unsatisfied causal dependencies), clears the
+cursor so the next request is a baseline. One walk of a shard forgets at most one
+round; a second failure reaches the caller. A frame naming a stream the client
+does not declare is `UpgradeRequired` at receipt, before anything is staged.
 
 A page holds at most `limit` entities and about 256 KiB, but always at least one
 entity; a document's `doc.delta` frames and its `row.set` count as one entity, so a
@@ -106,7 +117,12 @@ outcome, and the refusal reason when rejected), then runs it in a savepoint:
 - A claimed id returns its stored verdict without running the mutation again; the
   same id with different bytes fails the request with `MutationChanged`.
 - A declared refusal rolls back the group and records `rejected` with its reason.
-- An infrastructure failure rolls back the whole request, claims included.
+- A failure the same bytes would meet again — invalid data, a violated
+  constraint, an exception in the host's mutation code — is a verdict too: the
+  group rolls back and records `rejected` with the failure's reason, so a retry
+  cannot wedge the journal behind it.
+- A transient failure — contention, a lost connection, a timeout — rolls back the
+  whole request, claims included, and the client retries the same operations.
 
 The answer is `{verdicts: [{id, outcome: "accepted"|"rejected", reason?}]}` in
 request order. The client validates it completely before changing local state; a
@@ -170,6 +186,10 @@ An ordinary recreation names `replaces`, the previous deleted incarnation, and
 chooses a fresh incarnation. Unknown or stale predecessors are refused. Compact
 tombstones remain for the dataset's lifetime, even after their payload is
 collected. A derived child's lifetime comes from its declared parent binding.
+A `row.delete` of a lifetime that already ended is accepted without a new
+revision or position, and a child may be deleted after its parent died. A
+tombstone keeps its bucket; a live row captured over one is a birth with a new
+incarnation.
 
 Row patches change only their named fields. Distinct fields compose; competing
 values follow server transaction order unless domain normalization or explicit

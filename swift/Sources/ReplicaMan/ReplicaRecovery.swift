@@ -25,11 +25,13 @@ extension ReplicaStateStore {
 
     /// SQL copies raw state inside the caller's transaction. Damaged JSON remains
     /// recoverable, and a large pending history never becomes one in-memory blob.
+    /// Only authoring the server has not answered is evidence: an accepted
+    /// intent is the server's own state, waiting for a round to show it.
     func archiveEntity(
         _ db: Database, stream: String, id: String, reason: String, force: Bool = false
     ) throws {
         let hasAuthoring = try Bool.fetchOne(db, sql: """
-            SELECT EXISTS(SELECT 1 FROM intents WHERE row_id = ? AND stream = ? AND state <> 'refused')
+            SELECT EXISTS(SELECT 1 FROM intents WHERE row_id = ? AND stream = ? AND state IN ('draft', 'owed', 'frozen'))
                 OR EXISTS(SELECT 1 FROM holds WHERE stream = ? AND row_id = ?)
             """, arguments: [id, stream, stream, id]) ?? false
         guard force || hasAuthoring else { return }

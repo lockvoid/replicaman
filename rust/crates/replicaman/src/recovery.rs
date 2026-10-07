@@ -51,7 +51,7 @@ impl ReplicaStateStore {
         force: bool,
     ) -> ReplicaResult<()> {
         let authored: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM intents WHERE stream = ?1 AND row_id = ?2 AND state <> 'refused')
+            "SELECT EXISTS(SELECT 1 FROM intents WHERE stream = ?1 AND row_id = ?2 AND state IN ('owed', 'frozen'))
                 OR EXISTS(SELECT 1 FROM holds WHERE stream = ?1 AND row_id = ?2)",
             params![stream, id], |row| row.get(0))?;
         if !force && !authored {

@@ -56,7 +56,7 @@ module ReplicaMan
         next unless fresh
 
         snapshot = snapshots.find_by(row_id: row_id)
-        next :missing_fold if @stream.document? && (snapshot.nil? || snapshot.document.nil?)
+        next :missing_fold if @stream.document? && (snapshot.nil? || snapshot.document.nil? || snapshot.deleted_at)
         next if snapshot && snapshot.deleted_at.nil? && current?(snapshot, fresh)
 
         Capture.record(@stream, fresh)

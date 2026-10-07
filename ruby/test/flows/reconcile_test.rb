@@ -52,6 +52,32 @@ class ReconcileTest < ActiveSupport::TestCase
     assert_equal 1, counts[:jobs][:tombstoned]
   end
 
+  test 'a row resurrected behind its tombstone is reborn with a new lifetime' do
+    job = Job.create!(id: 'j1', user: @user, state: 'queued')
+    ended = ReplicaMan::Snapshot.find_by!(stream: 'jobs', row_id: 'j1').incarnation
+    job.destroy!
+    uncaptured_fixture(Job) { Job.insert_all([{ id: 'j1', user_id: 'u1', state: 'queued' }]) }
+
+    counts = ReplicaMan::Reconcile.call(DummyReplica)
+
+    snapshot = ReplicaMan::Snapshot.find_by!(stream: 'jobs', row_id: 'j1')
+    assert_nil snapshot.deleted_at
+    refute_equal ended, snapshot.incarnation, 'deletion ended the lifetime; what returns is a birth'
+    assert_equal 1, counts[:jobs][:recaptured]
+  end
+
+  test 'a document resurrected behind its tombstone is reported, not reborn without its fold' do
+    DummyReplica.document(:boards, 'b1').create(user_id: 'u1') { it.get_map('meta').set('name', 'Plans') }
+    Board.find('b1').destroy!
+    uncaptured_fixture(Board) { Board.insert_all([{ id: 'b1', user_id: 'u1', name: 'Plans' }]) }
+
+    counts = ReplicaMan::Reconcile.call(DummyReplica)
+
+    assert_equal({ recaptured: 0, tombstoned: 0, missing_fold: 1 }, counts[:boards])
+    assert ReplicaMan::Snapshot.find_by!(stream: 'boards', row_id: 'b1').deleted_at,
+           'the tombstone stands until the document is born through its door'
+  end
+
   test 'document lane: projection drift is re-captured without moving the fold position; a doorless birth is counted, not healed' do
     DummyReplica.document(:boards, 'b1').create(user_id: 'u1') { it.get_map('meta').set('name', 'Plans') }
     fold_position = ReplicaMan::Snapshot.find_by!(stream: 'boards', row_id: 'b1').document_position

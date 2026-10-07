@@ -63,7 +63,8 @@ module ReplicaMan
 
         stream.member!(op.user, row)
         refuse!(op)
-        destroy_row(stream, stream.locate(op.row_id))
+        record = stream.locate(op.row_id)
+        record ? destroy_row(stream, record) : Capture.record_deletion(stream, op.row_id)
       end
 
       def destroy_row(stream, record)
@@ -113,12 +114,15 @@ module ReplicaMan
         stream.locate(row_id).update!(**reflect(stream, doc), **project(doc))
       end
 
+      # Compaction is a captured change: the fold's new axis is the position the capture claims.
       def compact(replica, stream, row_id)
-        ActiveRecord::Base.transaction do
+        replica.transaction do
           row = lock_fold(stream, row_id) || raise(ActiveRecord::RecordNotFound, "no fold for #{stream.stream_name}/#{row_id}")
-          break if row.deleted_at
+          next if row.deleted_at
 
           fold_tail(replica, stream, row_id, replica.codec.load(row.document))
+          record = stream.locate(row_id) || raise(ActiveRecord::RecordNotFound, "no row for #{stream.stream_name}/#{row_id}")
+          Capture.record(stream, record)
         end
       end
 
@@ -130,12 +134,15 @@ module ReplicaMan
 
       private
 
+      # The folded history is reachable only through the fold: the axis moves to
+      # the position this transaction claims at commit, so every cursor behind
+      # the fold is handed the document.
       def fold_tail(replica, stream, row_id, doc)
         folded = ReplicaMan::Delta.where(namespace: stream.replica.namespace, stream: stream.stream_name, row_id: row_id).delete_all
         folded_bytes = replica.codec.fold(doc)
         connection.execute(<<~SQL)
           UPDATE replica_man_snapshots
-          SET document = #{bytea(folded_bytes)}, document_position = position, updated_at = now()
+          SET document = #{bytea(folded_bytes)}, document_position = #{Capture::UNCLAIMED}, updated_at = now()
           WHERE namespace = #{quote(replica.namespace)} AND stream = #{quote(stream.stream_name)} AND row_id = #{quote(row_id)}
         SQL
         Frames.validate_snapshot!(replica, stream.stream_name, row_id)

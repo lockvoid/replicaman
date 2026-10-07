@@ -14,12 +14,16 @@ internal fun ReplicaStateStore.archiveDocument(db: SQLiteConnection, stream: Str
     archiveEntity(db, stream, rowId, reason, force = true)
 }
 
-/** Copy raw bytes in SQLite; damaged JSON and large histories remain exportable. */
+/**
+ * Copy raw bytes in SQLite; damaged JSON and large histories remain exportable.
+ * Only authoring the server has not answered is evidence: an accepted intent is
+ * the server's own state, waiting for a round to show it.
+ */
 internal fun ReplicaStateStore.archiveEntity(
     db: SQLiteConnection, stream: String, id: String, reason: String, force: Boolean = false,
 ) {
     val hasAuthoring = db.queryLong("""
-        SELECT EXISTS(SELECT 1 FROM intents WHERE row_id = ? AND stream = ? AND state <> 'refused')
+        SELECT EXISTS(SELECT 1 FROM intents WHERE row_id = ? AND stream = ? AND state IN ('draft', 'owed', 'frozen'))
             OR EXISTS(SELECT 1 FROM holds WHERE stream = ? AND row_id = ?)
         """.trimIndent(), listOf(id, stream, stream, id)) == 1L
     if (!force && !hasAuthoring) return

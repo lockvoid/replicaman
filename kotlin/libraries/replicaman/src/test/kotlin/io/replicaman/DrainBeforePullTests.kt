@@ -1,10 +1,13 @@
 package io.replicaman
 
+import io.replicaman.testing.ReplicaPullResponse
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import io.replicaman.support.Fixture
 import io.replicaman.support.ReplicaTestCase
 import io.replicaman.support.StubTransport
+import io.replicaman.support.peekPending
+import io.replicaman.support.peekSnapshot
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -34,6 +37,28 @@ class DrainBeforePullTests : ReplicaTestCase() {
         val pull = events[1] as? StubTransport.Event.Pull
             ?: fail("the pull follows the drain, saw $events")
         assertEquals("user", pull.shard)
+    }
+
+    /**
+     * Push and pull are independent: a push the server refuses — one bad operation fails the
+     * whole request, on every retry — reaches health and never keeps the shard from receiving.
+     */
+    @Test
+    fun aPushTheServerRefusesDoesNotStopThePull() = runTest {
+        val store = Fixture.store()
+        val transport = StubTransport()
+        val engine = Fixture.engine(store = store, transport = transport)
+        engine.pullOnce("user")
+        engine.saveRow("notes", "n1", null, mapOf("title" to ReplicaValue.Str("mine")))
+        transport.refusePushes(error = ReplicaError.Protocol("operation data must be an object", "HTTP 400"))
+        transport.queuePull("user", ReplicaPullResponse(frames = listOf(Fixture.note("n2", "from the server")), cursor = "c2", more = false))
+
+        val published = engine.pullUntilCaughtUp(listOf("user"))
+
+        assertEquals(1, published)
+        assertEquals("from the server", store.peekSnapshot("notes", "n2")?.data?.get("title")?.string)
+        assertEquals(1, store.peekPending().size, "the refused submission stays frozen for its own retry")
+        assertEquals("push before pull", engine.health.failure.value?.operation)
     }
 
     /** KILL: push unconditionally before every pull — a read costs two requests. */

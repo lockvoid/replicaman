@@ -5,6 +5,7 @@ import io.replicaman.support.ReplicaTestCase
 import io.replicaman.support.StubTransport
 import io.replicaman.support.peekPending
 import io.replicaman.support.peekSnapshot
+import io.replicaman.testing.ReplicaPullResponse
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
 import java.io.ByteArrayOutputStream
@@ -105,18 +106,28 @@ class RecoveryStoreTests : ReplicaTestCase() {
         assertEquals(ReplicaValue.Str("keep"), store.peekSnapshot("notes", "n1")?.data?.get("title"))
     }
 
+    /**
+     * Push and pull are independent: a journal the engine cannot read fails every explicit
+     * drain loudly and reaches health from the pull's own barrier, while the shard keeps
+     * receiving. The damaged bytes stay as they are.
+     */
     @Test
-    fun corruptJournalFailurePropagatesOnEveryPull() = runBlocking<Unit> {
+    fun aCorruptJournalFailsTheDrainLoudlyAndNeverKeepsTheShardFromReceiving() = runBlocking<Unit> {
         val store = Fixture.store()
         val transport = StubTransport()
         val engine = Fixture.engine(store = store, transport = transport)
         engine.saveRow("notes", "n1", null, mapOf("title" to ReplicaValue.Str("keep")))
         store.write { it.exec("UPDATE intents SET payload = '{damaged'") }
+        transport.queuePull("user", ReplicaPullResponse(listOf(Fixture.note("n2", "from the server")), "c1", more = false))
 
-        repeat(2) { assertFailsWith<ReplicaError.Storage> { engine.pullOnce("user") } }
+        repeat(2) { assertFailsWith<ReplicaError.Storage> { engine.drain() } }
+        val published = engine.pullOnce("user")
 
-        assertEquals(0, transport.pullCount())
-        assertNull(engine.currentCursor("user"))
+        assertEquals(1, published)
+        assertEquals(ReplicaValue.Str("from the server"), store.peekSnapshot("notes", "n2")?.data?.get("title"))
+        assertEquals(1, transport.pullCount())
+        assertEquals("c1", engine.currentCursor("user"))
+        assertEquals("push before pull", engine.health.failure.value?.operation)
         assertEquals("{damaged", store.read { it.queryString("SELECT payload FROM intents") })
     }
 }

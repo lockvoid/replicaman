@@ -16,6 +16,8 @@ module ReplicaMan
       end
 
       EntityFence.lock(stream, op.row_id)
+      return if op.verb == 'row.delete' && ended?(stream, op)
+
       References.verify!(stream, op)
       verify_lifetime!(stream, op)
       verify_fields!(stream, op)
@@ -33,6 +35,12 @@ module ReplicaMan
     end
 
     private
+
+    # Deleting a lifetime that already ended asks for nothing: a delete is idempotent across devices.
+    def ended?(stream, op)
+      snapshot = snapshots(stream).find_by(row_id: op.row_id)
+      snapshot.present? && snapshot.deleted_at.present? && snapshot.incarnation == op.incarnation
+    end
 
     def verify_lifetime!(stream, op)
       snapshot = snapshots(stream).find_by(row_id: op.row_id)

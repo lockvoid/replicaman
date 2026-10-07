@@ -49,6 +49,27 @@ final class DrainBeforePullTests: XCTestCase {
         XCTAssertTrue(try store.peekPending().isEmpty)
     }
 
+    /// Push and pull are independent: a push the server refuses — one bad
+    /// operation fails the whole request, on every retry — reaches health and
+    /// never keeps the shard from receiving.
+    func testAPushTheServerRefusesDoesNotStopThePull() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport)
+        try await engine.pullOnce(shard: "user")
+        try await engine.saveRow(stream: "notes", id: "n1", type: nil, data: ["title": .string("mine")])
+        await transport.failPushes(throwing: .protocolFailure(code: "operation data must be an object", message: "HTTP 400"))
+        await transport.queuePull(shard: "user", .init(frames: [Fixture.note("n2", title: "from the server")], cursor: "c2", more: false))
+
+        let published = try await engine.pullUntilCaughtUp(shards: ["user"])
+
+        XCTAssertEqual(published, 1)
+        XCTAssertEqual(try store.peekSnapshot("notes", "n2")?.data["title"], .string("from the server"))
+        XCTAssertEqual(try store.peekPending().count, 1, "the refused submission stays frozen for its own retry")
+        let failure = try XCTUnwrap(engine.health.lastFailure)
+        XCTAssertEqual(failure.operation, "push before pull")
+    }
+
     func testEmptyJournalPullsWithoutAPush() async throws {
         let store = try Fixture.store()
         let transport = StubTransport()

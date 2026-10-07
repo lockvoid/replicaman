@@ -84,7 +84,6 @@ module ReplicaMan
 
         written = entries.select do |entry|
           refresh(entry) unless entry.fetch(:deleted)
-          prepare_birth(entry) if entry.fetch(:birth, false)
           changed = upsert(entry)
           Frames.validate_snapshot!(entry.fetch(:replica), entry.fetch(:stream), entry.fetch(:row_id)) if changed
           CaptureHooks.clear(entry)
@@ -227,6 +226,7 @@ module ReplicaMan
         end
       end
 
+      # A live row over a tombstone is a birth whatever wrote it: deletion ended the lifetime.
       def upsert(entry)
         address = address(entry)
         previous = Snapshot.lock.find_by(address)
@@ -234,6 +234,7 @@ module ReplicaMan
         return false if entry.fetch(:deleted) && previous.nil?
 
         authorize!(entry)
+        prepare_birth(entry) if entry.fetch(:birth, false) || (previous&.deleted_at && !entry.fetch(:deleted))
         return false if unchanged?(entry, previous, address)
 
         write(entry, entry.fetch(:bucket) && UNCLAIMED)
@@ -272,12 +273,13 @@ module ReplicaMan
       end
 
       # A row whose owner reads nil is outside every replica: it leaves like a deletion.
+      # Its tombstone keeps the bucket: a cursor of that bucket counts on reaching it.
       def settle_owner!(entry, previous)
         entry.merge!(deleted: true, data: {}) if entry.fetch(:bucket).nil? && !entry.fetch(:deleted)
         if entry.fetch(:deleted)
           entry[:bucket] = previous&.bucket
           entry[:data] = previous.data if entry.fetch(:data).empty? && previous&.data
-        elsif previous&.bucket && previous.deleted_at.nil? && previous.bucket != entry.fetch(:bucket)
+        elsif previous&.bucket && previous.bucket != entry.fetch(:bucket)
           raise Refused, "a row's owner cannot change: #{entry.fetch(:stream)}/#{entry.fetch(:row_id)}"
         end
       end
@@ -303,9 +305,13 @@ module ReplicaMan
         return false if previous.nil? || previous.deleted_at || previous.position.nil? || entry.fetch(:deleted)
         return false unless previous.bucket == entry.fetch(:bucket) && previous.row_type == entry.fetch(:type)
         return false unless [nil, previous.incarnation].include?(entry.fetch(:incarnation, nil))
-        return false if entry.fetch(:document) && (previous.document_position.nil? || Delta.where(address).where(position: nil).exists?)
+        return false if entry.fetch(:document) && fold_moved?(previous, address)
 
         previous.data == JSON.parse(entry.fetch(:data).to_json)
+      end
+
+      def fold_moved?(previous, address)
+        [nil, UNCLAIMED].include?(previous.document_position) || Delta.where(address).where(position: nil).exists?
       end
 
       def authorize!(entry)

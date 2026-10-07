@@ -43,6 +43,27 @@ public sealed class ReplicaError(message: String) : Exception(message) {
         ReplicaError("readonly stream: $stream")
 
     /**
+     * A row id outside the protocol's business key — UTF-8 of 1 to 1024
+     * bytes without NUL. Nothing is written: the server would refuse the
+     * whole push it rode in, forever.
+     */
+    public data class InvalidRowId(val stream: String, val id: String) :
+        ReplicaError("invalid row id: $stream/${id.take(64)}")
+
+    /**
+     * A write whose wire operation exceeds the request limit. Nothing is
+     * written: an intent that can never leave would stop the queue behind it.
+     */
+    public data class OversizedWrite(val stream: String, val id: String, val bytes: Int) :
+        ReplicaError("oversized write: $stream/$id ($bytes bytes)")
+
+    /**
+     * A draft write the draft could not undo: a document the draft did not
+     * create, or a document's deletion. Nothing is written.
+     */
+    public data class DraftBlocked(val reason: String) : ReplicaError("draft blocked: $reason")
+
+    /**
      * Nobody owns this process, so there is no store to work in. Every write
      * verb answers this while the engine is closed; reads answer empty.
      */

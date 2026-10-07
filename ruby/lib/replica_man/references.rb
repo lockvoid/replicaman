@@ -44,7 +44,7 @@ module ReplicaMan
         EntityFence.lock(parent_stream, reference.fetch('id'))
         parent = Snapshot.find_by(namespace: stream.replica.namespace,
                                   stream: parent_stream.stream_name, row_id: reference.fetch('id'))
-        unless parent && parent.deleted_at.nil? && parent.incarnation == reference.fetch('incarnation')
+        unless parent && parent.incarnation == reference.fetch('incarnation') && (parent.deleted_at.nil? || op.verb == 'row.delete')
           raise Refused, 'referenced entity incarnation is no longer current'
         end
         unless stream.replica.buckets(op.user, parent_stream.shard).include?(parent.bucket)

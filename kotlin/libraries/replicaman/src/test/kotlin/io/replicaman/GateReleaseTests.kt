@@ -73,7 +73,7 @@ class GateReleaseTests : ReplicaTestCase() {
     }
 
     /** KILL: `journalRelease` — release every row as a create; the server already has this one. */
-    @Test fun aRowTheServerKnowsLeavesAsOnePatchOfEveryField(): Unit = runTest {
+    @Test fun aRowTheServerKnowsLeavesAsOnePatchOfEveryFieldItMoved(): Unit = runTest {
         val transport = StubTransport()
         val released = ReleaseLedger()
         val engine = Fixture.engine(Fixture.store(), transport = transport, syncGates = listOf(blobGate(released)))
@@ -118,7 +118,7 @@ class GateReleaseTests : ReplicaTestCase() {
 
         val sent = transport.pushedBatches().flatten()
         assertEquals(listOf(ReplicaOp.Verb.ROW_PATCH), sent.map { it.verb })
-        assertEquals(mapOf("title" to str("a"), "blob" to str("k1")), sent.first().data)
+        assertEquals(mapOf("blob" to str("k1")), sent.first().data)
     }
 
     /**
@@ -153,7 +153,42 @@ class GateReleaseTests : ReplicaTestCase() {
         released.land("k1")
         settled(engine, emptyList())
         engine.drain()
-        assertEquals(mapOf("title" to str("a"), "blob" to str("k1")), transport.pushedBatches().flatten().last().data)
+        assertEquals(mapOf("blob" to str("k1")), transport.pushedBatches().flatten().last().data, "the title the device never moved is not sent")
+    }
+
+    /**
+     * A field the server moved while the row was held, and the device did not, is the server's:
+     * the held row shows it, and the release carries only what the device moved.
+     *
+     * KILL: `materializeBase` — merge no base field into a held row; or `journalRelease` — send
+     * `current` instead of what moved against the base.
+     */
+    @Test fun aReleasedPatchLeavesAFieldTheServerMovedAlone(): Unit = runTest {
+        val store = Fixture.store()
+        val transport = StubTransport()
+        val backup = BackupFlag(on = true)
+        val engine = Fixture.engine(store, transport = transport, syncGates = listOf(backup.gate))
+        transport.queuePull("user", ReplicaPullResponse(frames = listOf(
+            ReplicaFrame.RowSet("notes", "n1", null, mapOf("title" to str("a"), "rank" to str("1"))),
+        ), cursor = "c1", more = false))
+        engine.pullOnce()
+
+        backup.set(false)
+        engine.saveRow("notes", "n1", null, mapOf("title" to str("b")))
+        transport.queuePull("user", ReplicaPullResponse(frames = listOf(
+            ReplicaFrame.RowSet("notes", "n1", null, mapOf("title" to str("a"), "rank" to str("2"))),
+        ), cursor = "c2", more = false))
+        engine.pullOnce()
+        assertEquals(mapOf("title" to str("b"), "rank" to str("2")), store.peekSnapshot("notes", "n1")?.data,
+            "the held row keeps what the device moved and shows what the server moved")
+
+        backup.set(true)
+        settled(engine, emptyList())
+        engine.drain()
+
+        val sent = transport.pushedBatches().flatten()
+        assertEquals(listOf(ReplicaOp.Verb.ROW_PATCH), sent.map { it.verb })
+        assertEquals(mapOf("title" to str("b")), sent.first().data, "rank 2 is the server's; the device never touched it")
     }
 
     @Test fun aRowDeletedWhileHeldLeavesAsADeleteWhenTheServerKnowsIt(): Unit = runTest {

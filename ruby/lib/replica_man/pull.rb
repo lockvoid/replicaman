@@ -47,10 +47,15 @@ module ReplicaMan
 
     def read
       buckets = @replica.buckets(@user, @shard)
-      cursor = Cursor.decode(@body.fetch('cursor', nil), buckets)
-      @bootstrap = Cursor.bootstrap?(@body.fetch('cursor', nil))
+      raw = @body.fetch('cursor', nil)
+      cursor = Cursor.decode(raw, buckets)
+      started = Cursor.started(raw, buckets)
+      @bootstrap = !started.nil?
       heads = @heads = Buckets.heads(@replica.namespace, buckets)
       raise Protocol::Error.new('CursorInvalid') if buckets.any? { cursor.fetch(it) > heads.fetch(it) }
+
+      @started = started.presence || heads
+      raise Protocol::Error.new('CursorInvalid') if @bootstrap && buckets.any? { @started.fetch(it) > heads.fetch(it) }
 
       @frames = []
       @entities = 0
@@ -65,9 +70,9 @@ module ReplicaMan
       more = buckets.any? { reached.fetch(it) < heads.fetch(it) }
       Protocol.header(@replica).merge(
         shard: @shard,
-        reset: @body.fetch('cursor', nil).nil?,
+        reset: raw.nil?,
         frames: @frames,
-        cursor: Cursor.encode(reached, bootstrap: @bootstrap && more),
+        cursor: Cursor.encode(reached, started: @bootstrap && more ? @started : nil),
         more: more
       )
     end
@@ -76,14 +81,15 @@ module ReplicaMan
       @entities >= @limit || @bytes >= Protocol::PAGE_BYTES
     end
 
-    # Returns the last position emitted. A bootstrap reads live rows only, so
-    # once they run out the rest of the bucket up to its head is tombstones.
+    # Returns the last position emitted. Once the rows run out, nothing up to
+    # the head is owed: a bootstrap skips the tombstones that preceded it, and a
+    # position a row left when it moved on is vacant.
     def read_bucket(bucket, since)
       reached = since
 
       loop do
-        entries = changes(bucket, reached, @limit - @entities, live: @bootstrap)
-        return @bootstrap ? @heads.fetch(bucket) : reached if entries.empty?
+        entries = changes(bucket, reached, @limit - @entities)
+        return @heads.fetch(bucket) if entries.empty?
 
         entries.each do |entry|
           emit(entry, since)
@@ -93,9 +99,10 @@ module ReplicaMan
       end
     end
 
-    def changes(bucket, after, limit, live:)
+    # A bootstrap reads the live rows and the tombstones of the round's own lifetime.
+    def changes(bucket, after, limit)
       scope = Snapshot.where(namespace: @replica.namespace, bucket: bucket).where('position > ?', after)
-      scope = scope.where(deleted_at: nil) if live
+      scope = scope.where('deleted_at IS NULL OR position > ?', @started.fetch(bucket)) if @bootstrap
       scope.select(*(Snapshot.column_names - %w[document data]), small_data).order(:position).limit(limit).to_a
     end
 

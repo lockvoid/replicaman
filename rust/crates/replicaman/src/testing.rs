@@ -144,6 +144,74 @@ impl ReplicaCodec for StubCodec {
     }
 }
 
+/// A codec whose payloads carry history with causal dependencies: token `N`
+/// depends on token `N-1`, so a fold cannot absorb a payload whose
+/// predecessor it never saw — the document's own `MissingCausalDeps`. Folds
+/// and payloads are the sorted, comma-separated tokens they carry.
+pub struct CausalCodec;
+
+impl CausalCodec {
+    pub fn payload(tokens: impl IntoIterator<Item = u32>) -> Vec<u8> {
+        let mut tokens: Vec<u32> = tokens.into_iter().collect();
+        tokens.sort_unstable();
+        tokens
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+            .into_bytes()
+    }
+
+    pub fn tokens(bytes: &[u8]) -> std::collections::BTreeSet<u32> {
+        std::str::from_utf8(bytes)
+            .unwrap_or_default()
+            .split(',')
+            .filter(|token| !token.is_empty())
+            .map(|token| token.parse().expect("a causal token"))
+            .collect()
+    }
+}
+
+impl ReplicaCodec for CausalCodec {
+    fn name(&self) -> &str {
+        "causal@1"
+    }
+
+    fn merge(&self, fold: Option<&[u8]>, payload: &[u8]) -> ReplicaResult<Vec<u8>> {
+        let mut seen = fold.map(Self::tokens).unwrap_or_default();
+        for token in Self::tokens(payload) {
+            if token > 1 && !seen.contains(&(token - 1)) {
+                return Err(ReplicaError::MissingCausalDeps);
+            }
+            seen.insert(token);
+        }
+        Ok(Self::payload(seen))
+    }
+
+    fn diff(&self, fold: &[u8], since: Option<&[u8]>) -> ReplicaResult<Vec<u8>> {
+        let acked = since.map(Self::tokens).unwrap_or_default();
+        Ok(Self::payload(Self::tokens(fold).into_iter().filter(|token| !acked.contains(token))))
+    }
+
+    fn version(&self, fold: &[u8]) -> ReplicaResult<Vec<u8>> {
+        Ok(fold.to_vec())
+    }
+
+    fn payload_version(&self, payload: &[u8]) -> ReplicaResult<Vec<u8>> {
+        Ok(payload.to_vec())
+    }
+
+    fn merge_versions(&self, a: Option<&[u8]>, b: &[u8]) -> ReplicaResult<Vec<u8>> {
+        let mut tokens = a.map(Self::tokens).unwrap_or_default();
+        tokens.extend(Self::tokens(b));
+        Ok(Self::payload(tokens))
+    }
+
+    fn is_empty_diff(&self, payload: &[u8]) -> bool {
+        payload.is_empty()
+    }
+}
+
 // MARK: - Stub transport
 
 /// A frame a test scripts. The fixture server stamps its lifetime and revision
@@ -244,6 +312,7 @@ struct StubState {
     push_script: Option<PushScript>,
     pull_fails: bool,
     push_fails: bool,
+    push_failure: Option<ReplicaError>,
     push_success_budget: Option<i64>,
     lost_replies: usize,
     verdict_fault: Option<VerdictFault>,
@@ -288,6 +357,12 @@ impl StubTransport {
 
     pub fn fail_pushes(&self, fail: bool) {
         self.state.lock().push_fails = fail;
+    }
+
+    /// Every push request fails with this error before the server reads it —
+    /// the server's own refusal of a request (HTTP 400), not the wire's.
+    pub fn fail_pushes_with(&self, error: Option<ReplicaError>) {
+        self.state.lock().push_failure = error;
     }
 
     /// Succeed the first `calls` pushes, then fail — the chunked-drain
@@ -474,6 +549,9 @@ impl StubTransport {
         state.events.push(WireEvent::Push { ids });
         if state.push_fails {
             return Err(ReplicaError::Transport("push refused (stub)".into()));
+        }
+        if let Some(error) = &state.push_failure {
+            return Err(error.clone());
         }
         if let Some(budget) = state.push_success_budget {
             if budget <= 0 {
@@ -858,6 +936,16 @@ pub fn schema() -> ReplicaSchema {
     ReplicaSchema::new(vec![
         ReplicaStreamSpec::row("notes"),
         ReplicaStreamSpec::document("boards").codec("stub@1"),
+        ReplicaStreamSpec::row("jobs").readonly(true),
+        ReplicaStreamSpec::row("assets").shard("global"),
+    ])
+}
+
+/// The fixture schema with its document stream on the causal codec.
+pub fn causal_schema() -> ReplicaSchema {
+    ReplicaSchema::new(vec![
+        ReplicaStreamSpec::row("notes"),
+        ReplicaStreamSpec::document("boards").codec("causal@1"),
         ReplicaStreamSpec::row("jobs").readonly(true),
         ReplicaStreamSpec::row("assets").shard("global"),
     ])

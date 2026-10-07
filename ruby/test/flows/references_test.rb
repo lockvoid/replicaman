@@ -51,6 +51,19 @@ class ReferencesTest < ActiveSupport::TestCase
     assert_equal 'accepted', outcome(birth('new-authoring'))
   end
 
+  test 'a child deleted after its parent died names the lifetime it belonged to, and goes' do
+    assert_equal 'accepted', outcome(birth('orphan'))
+    reference = parent_reference
+    DummyReplica.transaction { ReplicaMan::Capture.record_deletion(Streams::Boards, @board.id) }
+    assert ReplicaMan::Snapshot.find_by!(stream: 'boards', row_id: @board.id).deleted_at
+
+    deletion = { 'id' => 'del-orphan', 'op' => 'row.delete', 'stream' => 'items', 'row_id' => 'orphan',
+                 'incarnation' => @client.incarnation('items', 'orphan'), 'references' => [reference] }
+
+    assert_equal 'accepted', outcome(deletion)
+    assert_nil Item.find_by(id: 'orphan')
+  end
+
   test 'derived births use the same identity on the server and an offline client' do
     Streams::Items.lifetime_from :board_id
     parent = parent_reference

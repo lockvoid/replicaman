@@ -500,39 +500,6 @@ private func transact<T>(_ engine: ReplicaEngine, _ body: (ReplicaTransaction) t
     try engine.write(body)
 }
 
-/// Opened by sync code, awaited by async code — nothing ever holds a thread of
-/// the cooperative pool waiting on it (a held one starves the engine and the
-/// transport the test is interleaving).
-private final class Latch: @unchecked Sendable {
-    private let lock = NSLock()
-    private var isOpen = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    var opened: Bool { lock.withLock { isOpen } }
-
-    func open() {
-        lock.lock()
-        isOpen = true
-        let woken = waiters
-        waiters.removeAll()
-        lock.unlock()
-        for waiter in woken { waiter.resume() }
-    }
-
-    func wait() async {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            guard !isOpen else {
-                lock.unlock()
-                continuation.resume()
-                return
-            }
-            waiters.append(continuation)
-            lock.unlock()
-        }
-    }
-}
-
 /// Sync code that holds its thread on purpose — a transaction waiting inside
 /// the writer — on a thread of its own, outside the cooperative pool.
 private func onThread<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {

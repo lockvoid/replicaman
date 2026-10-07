@@ -32,6 +32,7 @@ mod transactions;
 pub use transactions::ReplicaTransaction;
 mod adoption;
 mod checkpoints;
+use checkpoints::PullStep;
 mod integrity;
 use parking_lot::Mutex;
 
@@ -55,7 +56,7 @@ use crate::wire::{ReplicaFrame, ReplicaOp, ReplicaVerdict, VerdictOutcome, verb}
 use crate::{ReplicaGateHold, SyncChange, SyncChangeKind, SyncGate, SyncGateDecision};
 
 /// A runaway reducer must not spin the flight forever.
-const MAX_DRAIN_PASSES: usize = 16;
+pub(crate) const MAX_DRAIN_PASSES: usize = 16;
 
 type RejectionHandler = Arc<dyn Fn(&ReplicaOp, &str) + Send + Sync>;
 type CheckpointFault = Arc<dyn Fn() -> ReplicaResult<()> + Send + Sync>;
@@ -840,7 +841,7 @@ impl ReplicaEngine {
             return Ok(0);
         }
         self.drain_if_warm().await?;
-        Ok(self.pull_page(shard).await?.0)
+        Ok(self.pull_page(shard).await?.applied)
     }
 
     /// The named shards (every shard by default) until the server reports
@@ -856,10 +857,19 @@ impl ReplicaEngine {
             .unwrap_or_else(|| self.schema.shards().to_vec());
         let mut total = 0;
         for shard in shards {
+            // A round the shard could not publish is forgotten once; a second
+            // one in the same walk is the caller's to see.
+            let mut forgotten: Option<ReplicaError> = None;
             loop {
-                let (applied, more) = self.pull_page(&shard).await?;
-                total += applied;
-                if !more {
+                let step = self.pull_page(&shard).await?;
+                if let Some(reason) = step.forgotten {
+                    if forgotten.is_some() {
+                        return Err(reason);
+                    }
+                    forgotten = Some(reason);
+                }
+                total += step.applied;
+                if !step.more {
                     break;
                 }
             }
@@ -887,7 +897,7 @@ impl ReplicaEngine {
         })
     }
 
-    async fn pull_page(&self, shard: &str) -> ReplicaResult<(usize, bool)> {
+    async fn pull_page(&self, shard: &str) -> ReplicaResult<PullStep> {
         let (store, _admission) = self.begin_wire_operation().await?;
         self.pull_page_body(shard, &store).await
     }
@@ -896,7 +906,7 @@ impl ReplicaEngine {
         &self,
         shard: &str,
         store: &Arc<ReplicaStateStore>,
-    ) -> ReplicaResult<(usize, bool)> {
+    ) -> ReplicaResult<PullStep> {
         let _flight = self.pull_serial.lock().await;
         self.download_page(shard, store, self.transport.as_ref())
             .await
@@ -921,8 +931,15 @@ impl ReplicaEngine {
         row_type: Option<&str>,
         data: &ReplicaFields,
     ) -> ReplicaResult<()> {
-        self.write_row(stream, id, row_type, data, None, RowWriteExpectation::Absent)
-            .await
+        self.write_row(
+            stream,
+            id,
+            row_type,
+            data,
+            None,
+            RowWriteExpectation::Absent,
+        )
+        .await
     }
 
     /// A generated model's birth: the journal carries `data`, the local row
@@ -935,8 +952,15 @@ impl ReplicaEngine {
         data: &ReplicaFields,
         snapshot: &ReplicaFields,
     ) -> ReplicaResult<()> {
-        self.write_row(stream, id, row_type, data, Some(snapshot), RowWriteExpectation::Absent)
-            .await
+        self.write_row(
+            stream,
+            id,
+            row_type,
+            data,
+            Some(snapshot),
+            RowWriteExpectation::Absent,
+        )
+        .await
     }
 
     /// Updates require a live row; they cannot resurrect a concurrent delete.
@@ -947,8 +971,15 @@ impl ReplicaEngine {
         row_type: Option<&str>,
         data: &ReplicaFields,
     ) -> ReplicaResult<()> {
-        self.write_row(stream, id, row_type, data, None, RowWriteExpectation::Present)
-            .await
+        self.write_row(
+            stream,
+            id,
+            row_type,
+            data,
+            None,
+            RowWriteExpectation::Present,
+        )
+        .await
     }
 
     /// Engine seeding/upsert primitive. Client-facing streams intentionally
@@ -997,6 +1028,19 @@ impl ReplicaEngine {
         Ok(())
     }
 
+    /// The business key a row id may be: nonempty, at most 1024 bytes, no NUL.
+    /// Judged at the door — the journal must never carry an address the
+    /// server refuses on every retry.
+    fn validate_address(stream: &str, id: &str) -> ReplicaResult<()> {
+        if id.is_empty() || id.len() > 1024 || id.bytes().any(|byte| byte == 0) {
+            return Err(ReplicaError::InvalidRowId {
+                stream: stream.to_owned(),
+                id: id.to_owned(),
+            });
+        }
+        Ok(())
+    }
+
     fn apply_row_write(
         &self,
         ctx: &mut WriteContext<'_>,
@@ -1010,6 +1054,7 @@ impl ReplicaEngine {
         expectation: RowWriteExpectation,
         requested_lane: ReplicaLane,
     ) -> ReplicaResult<()> {
+        Self::validate_address(stream, id)?;
         self.validate_atomic_address(ctx, store, stream, id)?;
         let existing = store.snapshot(&ctx.tx, stream, id)?;
         match (expectation, existing.is_some()) {
@@ -1126,6 +1171,7 @@ impl ReplicaEngine {
         id: &str,
         requested_lane: ReplicaLane,
     ) -> ReplicaResult<bool> {
+        Self::validate_address(stream, id)?;
         self.validate_atomic_address(ctx, store, stream, id)?;
         let incarnation = store.incarnation(&ctx.tx, stream, id)?;
         let mut births = Vec::new();
@@ -1409,6 +1455,7 @@ impl ReplicaEngine {
         stamp: Option<&ReplicaCreateStamp>,
     ) -> ReplicaResult<bool> {
         let (store, _admitted) = self.admit_local_write().await?;
+        Self::validate_address(stream, id)?;
         let spec = self.writable_spec(stream)?;
         if spec.lane != StreamLane::Document {
             return Err(ReplicaError::LaneMismatch(stream.to_owned()));
@@ -2221,12 +2268,14 @@ impl ReplicaEngine {
             };
             if !cold {
                 if let Err(error) = self.drain_lane(lane).await {
-                    if !matches!(error, ReplicaError::Transport(_)) {
+                    if matches!(error, ReplicaError::IdentityTransitionInProgress) {
                         return Err(error);
                     }
-                    // An unavailable upload connection may still permit downloads.
-                    // Report the failure and retain its immutable submissions.
-                    self.health.record("drain before pull", error);
+                    // Push and pull are independent: whatever stops the push —
+                    // the wire, the server's refusal, the journal — is reported,
+                    // its submissions stay for their own retry, and the shard
+                    // keeps receiving.
+                    self.health.record("push before pull", error);
                     return Ok(());
                 }
             }
@@ -2357,9 +2406,14 @@ impl ReplicaEngine {
                     row_type.as_deref(),
                     data,
                 )?;
-                if cascading && self.schema.lane_of(&op.stream) == StreamLane::Document {
-                    // The row returns but the fold died with the local delete —
-                    // only a re-bootstrap can rebuild it.
+                if cascading
+                    && self.schema.lane_of(&op.stream) == StreamLane::Document
+                    && store
+                        .base_row(&ctx.tx, &op.stream, &op.row_id)?
+                        .is_none_or(|base| base.fold.is_none())
+                {
+                    // The row returns and its document comes back from the base;
+                    // a document the base never held only a re-bootstrap can rebuild.
                     let target = self
                         .schema
                         .spec(&op.stream)

@@ -31,6 +31,42 @@ final class SaveDeleteTests: XCTestCase {
         XCTAssertEqual(try store.peekPending().count, 0, "an update of nothing owes the server nothing")
     }
 
+    /// The server would refuse the whole push carrying this id, on every
+    /// retry: the id is refused at the door, and nothing is written.
+    func testARowIdOutsideTheBusinessKeyIsRefusedAtTheDoor() async throws {
+        let store = try Fixture.store()
+        let engine = Fixture.engine(store: store, transport: StubTransport())
+
+        for id in ["", String(repeating: "x", count: 1025), "nul\u{0}key"] {
+            do {
+                try await engine.saveRow(stream: "notes", id: id, type: nil, data: ["title": .string("bad key")])
+                XCTFail("a write with an invalid id went through")
+            } catch let error as ReplicaError {
+                XCTAssertEqual(error, .invalidRowId(stream: "notes", id: id))
+            }
+        }
+        XCTAssertEqual(try store.allSnapshots(), [])
+        XCTAssertEqual(try store.peekPending().count, 0)
+    }
+
+    /// An intent over the request limit could never leave and would stop every
+    /// intent behind it: it is refused at the door, and nothing is written.
+    func testAWriteOverTheRequestLimitIsRefusedAtTheDoor() async throws {
+        let store = try Fixture.store()
+        let engine = Fixture.engine(store: store, transport: StubTransport())
+        let huge = String(repeating: "x", count: ReplicaProtocol.operationBytes)
+
+        do {
+            try await engine.saveRow(stream: "notes", id: "huge", type: nil, data: ["title": .string(huge)])
+            XCTFail("an oversized write went through")
+        } catch ReplicaError.oversizedWrite(let stream, let id, let bytes) {
+            XCTAssertEqual([stream, id], ["notes", "huge"])
+            XCTAssertGreaterThan(bytes, ReplicaProtocol.operationBytes)
+        }
+        XCTAssertNil(try store.peekSnapshot("notes", "huge"))
+        XCTAssertEqual(try store.peekPending().count, 0)
+    }
+
     /// `create` mints; a present id is the caller's mistake — the row's
     /// truth stands untouched.
     ///

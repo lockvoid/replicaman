@@ -104,6 +104,64 @@ final class PullRoundTests: XCTestCase {
         XCTAssertEqual(cursors, [nil])
     }
 
+    /// The server folded a document's history and shipped the fold's own delta
+    /// to nobody; the device's base lacks what the next delta stands on. That
+    /// history cannot be absorbed and only a baseline replaces the base: the
+    /// round is forgotten and the shard baselines again, once, in the same call.
+    func testHistoryTheBaseCannotAbsorbForgetsTheRoundAndTheShardBaselinesAgain() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport, schema: Fixture.causalSchema, codecs: [CausalCodec()])
+        await transport.queuePull(shard: "user", .init(frames: [
+            .docSnapshot(stream: "boards", id: "b1", codec: "causal@1", snapshot: CausalCodec.payload(1...3), data: ["name": .string("Board")]),
+        ], cursor: "c1", more: false))
+        try await engine.pullUntilCaughtUp(shards: ["user"])
+        await transport.queuePull(shard: "user", .init(frames: [
+            .docDelta(stream: "boards", id: "b1", seq: 1, codec: "causal@1", payload: CausalCodec.payload(5...5)),
+            .rowSet(stream: "boards", id: "b1", type: nil, data: ["name": .string("Renamed")]),
+            Fixture.note("n2", title: "two"),
+        ], cursor: "c2", more: false))
+        await transport.queuePull(shard: "user", .init(frames: [
+            .docSnapshot(stream: "boards", id: "b1", codec: "causal@1", snapshot: CausalCodec.payload(1...5), data: ["name": .string("Renamed")]),
+            Fixture.note("n2", title: "two"),
+        ], cursor: "b1", more: false))
+
+        let published = try await engine.pullUntilCaughtUp(shards: ["user"])
+
+        XCTAssertEqual(published, 2, "the baseline publishes")
+        XCTAssertEqual(try store.peekDoc("boards", "b1").map { CausalCodec.tokens($0.fold) }, Set(1...5))
+        XCTAssertEqual(try store.peekSnapshot("notes", "n2")?.data["title"], .string("two"))
+        let cursor = try await engine.currentCursor()
+        XCTAssertEqual(cursor, "b1")
+        let cursors = await requestedCursors(transport)
+        XCTAssertEqual(cursors, [nil, "c1", nil], "the round is forgotten and the shard baselines")
+        XCTAssertEqual(try store.recoveryRecords().count, 0, "nothing was authored, nothing is archived")
+    }
+
+    /// A second round the shard cannot publish, in the same call, is the
+    /// server's fault: its failure reaches the caller instead of another download.
+    func testASecondRoundTheShardCannotPublishReachesTheCaller() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport)
+        for index in 0..<3 {
+            await transport.queuePull(shard: "user", .init(frames: [Fixture.note("n1", title: "one")], cursor: "p1-\(index)", more: true))
+            await transport.queuePull(shard: "user", .init(frames: [
+                .docDelta(stream: "boards", id: "b9", seq: 1, codec: "stub@1", payload: Data("x".utf8)),
+            ], cursor: "p2-\(index)", more: false))
+        }
+
+        do {
+            _ = try await engine.pullUntilCaughtUp(shards: ["user"])
+            XCTFail("a baseline that cannot be published twice must fail")
+        } catch ReplicaError.protocolFailure(let code, _) {
+            XCTAssertEqual(code, "InvalidResponse")
+        }
+        let pulls = await transport.pullCount
+        XCTAssertEqual(pulls, 4, "one baseline forgotten, the second one's failure thrown")
+        XCTAssertNil(try store.peekSnapshot("notes", "n1"), "no partial round published")
+    }
+
     /// A fresh install's first launch: the warm-up and the knocker pull the
     /// user shard at once, and the snapshot is more than one page. Both callers
     /// must finish the round — on 2026-09-30 the second spun on the first's

@@ -24,6 +24,16 @@ public enum ReplicaError: Error, Equatable {
     /// A local write addressed a readonly stream — generated code cannot
     /// express this; reaching it means a caller bypassed the verbs.
     case readonlyStream(String)
+    /// A row id outside the protocol's business key — UTF-8 of 1 to 1024
+    /// bytes without NUL. Nothing is written: the server would refuse the
+    /// whole push it rode in, forever.
+    case invalidRowId(stream: String, id: String)
+    /// A write whose wire operation exceeds the request limit. Nothing is
+    /// written: an intent that can never leave would stop the queue behind it.
+    case oversizedWrite(stream: String, id: String, bytes: Int)
+    /// A draft write the draft could not undo: a document the draft did not
+    /// create, or a document's deletion. Nothing is written.
+    case draftBlocked(String)
     /// Nobody owns this process, so there is no store to work in. Every write
     /// verb answers this while the engine is closed; reads answer empty.
     case noOwner

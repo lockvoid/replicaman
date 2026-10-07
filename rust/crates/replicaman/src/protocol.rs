@@ -13,6 +13,9 @@ pub(crate) const VERSION: i64 = 2;
 pub(crate) const MAX_OPERATIONS: usize = 100;
 pub(crate) const ENTITY_BYTES: usize = 32 * 1024 * 1024;
 pub(crate) const RESPONSE_BYTES: usize = 2 * ENTITY_BYTES;
+/// The largest single operation a push request may carry: the entity budget
+/// less the request envelope.
+pub(crate) const OPERATION_BYTES: usize = ENTITY_BYTES - 1024;
 
 pub(crate) fn invalid(message: impl Into<String>) -> ReplicaError {
     ReplicaError::Protocol {

@@ -169,6 +169,30 @@ final class RevertOnRejectionTests: XCTestCase {
         XCTAssertEqual(restored, before, "byte-identical prior state — type and data alike")
     }
 
+    /// A refused delete of a pulled document brings the row back WITH its
+    /// document, from the base the pull left — never through a re-bootstrap.
+    func testARefusedDeleteOfAPulledDocumentRestoresItsDocumentFromTheBase() async throws {
+        let store = try Fixture.store()
+        let transport = StubTransport()
+        let engine = Fixture.engine(store: store, transport: transport)
+        await transport.queuePull(shard: "user", ReplicaPullResponse(
+            frames: [.docSnapshot(stream: "boards", id: "b1", codec: "stub@1", snapshot: Data("SNAP".utf8), data: ["name": .string("Board")])],
+            cursor: "5:", more: false
+        ))
+        try await engine.pullOnce(shard: "user")
+        try await engine.deleteRow(stream: "boards", id: "b1")
+        XCTAssertNil(try store.peekDoc("boards", "b1"))
+
+        await rejectAll(transport)
+        try await engine.drain()
+
+        XCTAssertEqual(try store.peekSnapshot("boards", "b1")?.data, ["name": .string("Board")])
+        XCTAssertEqual(try store.peekDoc("boards", "b1")?.fold, Data("SNAP".utf8), "the document comes back from the base")
+        let cursor = try await engine.currentCursor(shard: "user")
+        XCTAssertEqual(cursor, "5:", "no re-bootstrap: the published checkpoint stands")
+        XCTAssertEqual(try store.peekParked().count, 1)
+    }
+
     func testRejectedDocCreateRemovesTheWholeClientWrittenDoc() async throws {
         let store = try Fixture.store()
         let transport = StubTransport()

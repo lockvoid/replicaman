@@ -166,7 +166,7 @@ public class ReplicaEngine(
      * a bulk push is still on the wire.
      */
     private val activeDrains = mutableMapOf<ReplicaLane, Deferred<List<ReplicaVerdict>>>()
-    private val activePulls = mutableMapOf<String, Deferred<Pair<Int, Boolean>>>()
+    private val activePulls = mutableMapOf<String, Deferred<PullStep>>()
     private val writeGate = ReplicaWriteGate()
 
     /**
@@ -709,20 +709,16 @@ public class ReplicaEngine(
         schedulePush()
     }
 
+    /**
+     * Idempotent; an unknown key is silence. The draft's writes are undone the
+     * way a refusal undoes them — newest first, through their preimages — so a
+     * row the draft patched or deleted stands as it stood before the draft,
+     * and a row the draft bore is gone with its lifetime.
+     */
     public suspend fun discardDraft(draft: ReplicaDraft) = withContext(engineContext) {
         val store = writableStore()
         liveDocuments.publishing {
-            val documents = mutableListOf<LiveDocuments.Key>()
-            store.write { db ->
-                for ((stream, id) in store.draftAddresses(db, draft.key)) {
-                    store.deleteSnapshot(db, stream, id)
-                    if (schema.lane(stream) == ReplicaStreamSpec.Lane.DOCUMENT) {
-                        store.deleteDoc(db, stream, id)
-                        documents += LiveDocuments.Key(stream, id)
-                    }
-                }
-                store.dropDraftEntries(db, draft.key)
-            }
+            val documents = store.write { db -> revertDraft(db, draft.key, store) }
             for (key in documents) liveDocuments.evict(key)
         }
     }
@@ -732,13 +728,33 @@ public class ReplicaEngine(
             for (key in store.draftKeys(db)) {
                 for ((stream, id) in store.draftAddresses(db, key)) {
                     store.archiveEntity(db, stream, id, "Uncommitted draft recovered after restart")
-                    store.deleteSnapshot(db, stream, id)
-                    if (schema.lane(stream) == ReplicaStreamSpec.Lane.DOCUMENT) store.deleteDoc(db, stream, id)
                 }
-                store.dropDraftEntries(db, key)
+                revertDraft(db, key, store)
                 Log.logger.info("[open] swept a draft that outlived its process ($key)")
             }
         }
+    }
+
+    /** The draft's entries undone newest first and dropped. Returns the documents the draft bore. */
+    private fun revertDraft(db: SQLiteConnection, key: String, store: ReplicaStateStore): List<LiveDocuments.Key> {
+        val born = mutableListOf<LiveDocuments.Key>()
+        for (entry in store.draftEntries(db, key).asReversed()) {
+            val op = entry.op()
+            entry.preimage?.let { raw ->
+                val preimage = ReplicaPreimage.decode(raw)
+                revert(db, op, preimage, store, cascading = false)
+                if (op.verb == ReplicaOp.Verb.ROW_CREATE && preimage == ReplicaPreimage.Absent) {
+                    born += LiveDocuments.Key(op.stream, op.rowId)
+                }
+            }
+            store.discard(db, entry.id)
+        }
+        for (address in born) {
+            if (schema.lane(address.stream) == ReplicaStreamSpec.Lane.DOCUMENT) store.deleteDoc(db, address.stream, address.id)
+            store.dropHold(db, address.stream, address.id)
+            store.cancelUnsentBirth(db, address.stream, address.id)
+        }
+        return born.filter { schema.lane(it.stream) == ReplicaStreamSpec.Lane.DOCUMENT }
     }
 
     // MARK: - Pull
@@ -750,7 +766,7 @@ public class ReplicaEngine(
     public suspend fun pullOnce(shard: String = "user"): Int {
         if (withContext(engineContext) { binding.store == null || sealedFlag }) return 0
         drainIfWarm()
-        return pullPage(shard).first
+        return pullPage(shard).applied
     }
 
     /**
@@ -759,16 +775,26 @@ public class ReplicaEngine(
      * shard; the doorbell asks for the one it rang for — the server rings
      * for the user shard only, so a full walk per ring was a wasted catalog
      * round-trip each time.
+     *
+     * A round the shard cannot publish is forgotten once: the shard starts a
+     * fresh baseline. A second round it cannot publish is the server's fault,
+     * and its failure reaches the caller instead of another download.
      */
     public suspend fun pullUntilCaughtUp(shards: List<String>? = null): Int {
         if (withContext(engineContext) { binding.store == null || sealedFlag }) return 0
         drainIfWarm()
         var total = 0
         for (shard in shards ?: schema.shards) {
+            var forgotten: ReplicaError? = null
             while (true) {
-                val page = pullPage(shard)
-                total += page.first
-                if (!page.second) break
+                val step = pullPage(shard)
+                val reason = step.forgotten
+                if (reason != null) {
+                    if (forgotten != null) throw reason
+                    forgotten = reason
+                }
+                total += step.applied
+                if (!step.more) break
             }
         }
         return total
@@ -793,7 +819,7 @@ public class ReplicaEngine(
         }
     }
 
-    private suspend fun pullPage(shard: String): Pair<Int, Boolean> = withContext(engineContext) {
+    private suspend fun pullPage(shard: String): PullStep = withContext(engineContext) {
         val existing = activePulls[shard]
         if (existing != null) return@withContext awaitPull(existing)
         val flight = scope.async {
@@ -812,7 +838,7 @@ public class ReplicaEngine(
         awaitPull(flight)
     }
 
-    private suspend fun awaitPull(flight: Deferred<Pair<Int, Boolean>>): Pair<Int, Boolean> {
+    private suspend fun awaitPull(flight: Deferred<PullStep>): PullStep {
         try {
             return flight.await()
         } catch (error: CancellationException) {
@@ -903,6 +929,16 @@ public class ReplicaEngine(
     }
 
     /**
+     * The protocol's business key: UTF-8 of 1 to 1024 bytes without NUL. A
+     * write outside it is refused here — the server would refuse the whole
+     * push carrying it, on every retry.
+     */
+    private fun validateAddress(stream: String, id: String) {
+        val bytes = id.toByteArray(Charsets.UTF_8)
+        if (bytes.isEmpty() || bytes.size > 1024 || bytes.contains(0)) throw ReplicaError.InvalidRowId(stream, id)
+    }
+
+    /**
      * One row write inside an OPEN transaction — the shared body of
      * transactions and internal fixture helpers. A no-change diff is absorbed (returns
      * false, nothing journaled).
@@ -920,6 +956,7 @@ public class ReplicaEngine(
         draft: String? = currentDraftLocal.get(),
         snapshot: Map<String, ReplicaValue>? = null,
     ): Boolean {
+        validateAddress(stream, id)
         validateAtomicAddress(db, stream, id, store)
         if (existing != null) {
             // A missing row field and an explicit JSON null are the same
@@ -987,7 +1024,12 @@ public class ReplicaEngine(
 
     internal fun applyRowDelete(db: SQLiteConnection, store: ReplicaStateStore, spec: ReplicaStreamSpec,
                                stream: String, id: String, lane: ReplicaLane, draft: String? = currentDraftLocal.get()): Boolean {
+        validateAddress(stream, id)
         validateAtomicAddress(db, stream, id, store)
+        if (draft != null && spec.lane == ReplicaStreamSpec.Lane.DOCUMENT && store.draftBirth(db, stream, id) != draft) {
+            // A document's fold dies with its local deletion; a draft could not give it back.
+            throw ReplicaError.DraftBlocked("A draft cannot delete a document it did not create: $stream/$id")
+        }
         val incarnation = store.incarnation(db, stream, id)
         val births = store.entriesAddressing(db, stream, id, ReplicaOp.Verb.ROW_CREATE)
             .filter { it.op().incarnation == incarnation }
@@ -1058,6 +1100,7 @@ public class ReplicaEngine(
             if (spec.lane != ReplicaStreamSpec.Lane.DOCUMENT) {
                 throw ReplicaError.LaneMismatch(stream)
             }
+            validateAddress(stream, id)
             val codecName = codecName(spec)
             val rowData = stamped(data, spec.stamp, binding.owner).toMutableMap()
             val codec = codecs[codecName] ?: throw ReplicaError.Codec("no codec registered for $codecName")
@@ -1201,6 +1244,10 @@ public class ReplicaEngine(
         val identified = if (operation.incarnation == null) {
             store.identify(db, operation, schema, preimage = preimage)
         } else operation
+        if (identified.verb == ReplicaOp.Verb.DOC_DELTA && key != null && store.draftBirth(db, identified.stream, identified.rowId) != key) {
+            // Discarding the draft must give the document back; only a document the draft bore has nothing to give back.
+            throw ReplicaError.DraftBlocked("A draft edits only the documents it created: ${identified.stream}/${identified.rowId}")
+        }
         val superseded = if (identified.verb == ReplicaOp.Verb.DOC_DELTA) {
             store.unsentDelta(db, identified.stream, identified.rowId, key)
         } else null
@@ -1496,8 +1543,10 @@ public class ReplicaEngine(
 
     /**
      * The barrier variant: skips while the wire is known-cold — offline
-     * must not stack timeouts. Network errors reach health; storage, protocol
-     * and cancellation failures propagate. Explicit drains never skip.
+     * must not stack timeouts. Push and pull are independent: whatever stops
+     * a push — a dead wire, a refused request, bytes that will not freeze —
+     * reaches health and never keeps the pull from receiving. Cancellation
+     * and a sealed engine propagate. Explicit drains never skip.
      */
     public suspend fun drainIfWarm() {
         // Both priorities share the frozen submissions. Once they fail to
@@ -1507,9 +1556,7 @@ public class ReplicaEngine(
             try {
                 drain(lane)
             } catch (error: Exception) {
-                if (error !is ReplicaError.Transport) throw error
-                // Receiving remote changes is independent of an unavailable
-                // upload connection. Local storage and protocol errors propagate.
+                if (error is CancellationException || error is ReplicaError.IdentityTransitionInProgress) throw error
                 health.record(error, "push before pull")
                 Log.logger.warning("[drain] warm drain of $lane failed: $error")
                 return
@@ -1822,11 +1869,23 @@ public class ReplicaEngine(
                 }
             }
             current != null -> {
-                val pushed = schema.spec(held.stream)?.pushed
+                val spec = schema.spec(held.stream)
+                val pushed = spec?.pushed
                 val sendable = if (pushed == null) current else current.filterKeys { it in pushed }
                 if (held.serverKnows) {
+                    // A patch of what moved against the base the hold tracked: a field
+                    // the server moved meanwhile, and the device did not, stays the server's.
+                    val base = (ReplicaPreimage.require(held.preimage) as? ReplicaPreimage.Row)?.data.orEmpty()
+                    val moved = sendable.filter { (key, value) -> base[key] != value }.toMutableMap()
+                    if (moved.isEmpty()) {
+                        Log.logger.info("[gate] release ${held.stream}/${held.rowId}: nothing owed")
+                        return
+                    }
+                    for (field in spec?.preconditions.orEmpty()) {
+                        if (field !in moved) current[field]?.let { moved[field] = it }
+                    }
                     ReplicaOp(id = ReplicaID.ulid(), verb = ReplicaOp.Verb.ROW_PATCH,
-                        stream = held.stream, rowId = held.rowId, data = sendable)
+                        stream = held.stream, rowId = held.rowId, data = moved)
                 } else {
                     ReplicaOp(id = ReplicaID.ulid(), verb = ReplicaOp.Verb.ROW_CREATE,
                         stream = held.stream, rowId = held.rowId, type = type, data = sendable)
@@ -1969,9 +2028,11 @@ public class ReplicaEngine(
                 store.upsertSnapshot(
                     db, op.stream, op.rowId, preimage.shard, preimage.type, preimage.data
                 )
-                if (cascading && schema.lane(op.stream) == ReplicaStreamSpec.Lane.DOCUMENT) {
-                    // The row returns but the fold died with the local delete —
-                    // only a re-bootstrap can rebuild it.
+                if (cascading && schema.lane(op.stream) == ReplicaStreamSpec.Lane.DOCUMENT &&
+                    store.baseRow(db, op.stream, op.rowId)?.fold == null
+                ) {
+                    // The row returns and its document comes back from the base; a
+                    // document the base never held only a re-bootstrap can rebuild.
                     store.clearCursor(db, schema.spec(op.stream)?.shard ?: preimage.shard)
                 }
             }

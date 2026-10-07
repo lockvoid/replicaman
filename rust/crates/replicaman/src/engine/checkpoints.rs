@@ -3,16 +3,50 @@ use crate::protocol::{self, Connection};
 use crate::sync_store::{BaseRow, Download};
 use rusqlite::params;
 
+/// What one `/pull` request did: the frames it published, whether the shard
+/// has more to pull, and — when the request found the round could not be
+/// published — the failure the round was forgotten for.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PullStep {
+    pub applied: usize,
+    pub more: bool,
+    pub forgotten: Option<ReplicaError>,
+}
+
+impl PullStep {
+    pub(crate) const STAGED: Self = Self {
+        applied: 0,
+        more: true,
+        forgotten: None,
+    };
+
+    pub(crate) fn published(applied: usize) -> Self {
+        Self {
+            applied,
+            more: false,
+            forgotten: None,
+        }
+    }
+
+    pub(crate) fn restarted(reason: ReplicaError) -> Self {
+        Self {
+            applied: 0,
+            more: true,
+            forgotten: Some(reason),
+        }
+    }
+}
+
 impl ReplicaEngine {
     /// One `/pull` request of the shard's round. An answer with more to come is
-    /// staged; the answer that completes the round publishes every staged page.
-    /// Answers the frames published and whether the round continues.
+    /// staged; the answer that completes the round publishes every staged page,
+    /// the rebased local authoring and the cursor in one transaction.
     pub(super) async fn download_page(
         &self,
         shard: &str,
         store: &Arc<ReplicaStateStore>,
         transport: &dyn ReplicaTransport,
-    ) -> ReplicaResult<(usize, bool)> {
+    ) -> ReplicaResult<PullStep> {
         store.require_document_mode(self.document_mode)?;
         let connection = Connection {
             transport,
@@ -25,6 +59,10 @@ impl ReplicaEngine {
                 store.meta(&ctx.tx)?.dataset,
             ))
         })?;
+        let current = |db: &rusqlite::Connection| -> ReplicaResult<bool> {
+            Ok(store.read_generation(db, shard)? == generation
+                && store.download(db, shard)?.as_ref() == Some(&download))
+        };
         let answer = connection
             .pull(
                 shard,
@@ -34,36 +72,39 @@ impl ReplicaEngine {
             )
             .await;
         let (header, response) = match answer {
-            Err(ReplicaError::Protocol { code, .. }) if code == "CursorInvalid" => {
+            Err(ReplicaError::Protocol { code, message }) if code == "CursorInvalid" => {
                 store.pool().write(|ctx| {
-                    if store.read_generation(&ctx.tx, shard)? == generation {
+                    if current(&*ctx.tx)? {
                         store.restart_download(&ctx.tx, shard)?;
                     }
                     Ok(())
                 })?;
-                return Ok((0, true));
+                return Ok(PullStep::restarted(ReplicaError::Protocol { code, message }));
             }
             answer => answer?,
         };
         if response.shard != shard || response.reset != download.cursor.is_none() {
             return Err(protocol::invalid("Pull answered another shard or round"));
         }
-        if response.frames.iter().any(|frame| {
-            self.schema
-                .spec(frame.stream())
-                .is_none_or(|spec| spec.shard != shard)
-        }) {
-            return Err(protocol::invalid(
-                "Pulled frame names an unknown stream or another shard",
-            ));
+        for frame in &response.frames {
+            match self.schema.spec(frame.stream()) {
+                None => {
+                    return Err(ReplicaError::Protocol {
+                        code: "UpgradeRequired".into(),
+                        message: format!("Pulled frame names an undeclared stream: {}", frame.stream()),
+                    });
+                }
+                Some(spec) if spec.shard != shard => {
+                    return Err(protocol::invalid("Pulled frame belongs to another shard"));
+                }
+                Some(_) => {}
+            }
         }
         let _serial = self.checkpoint_serial.lock();
         let mut evicted = HashSet::new();
         let published = store.pool().write(|ctx| {
             store.adopt_dataset(&ctx.tx, &header.dataset)?;
-            if store.download(&ctx.tx, shard)?.as_ref() != Some(&download)
-                || store.read_generation(&ctx.tx, shard)? != generation
-            {
+            if !current(&*ctx.tx)? {
                 return Ok(None);
             }
             store.stage_page(&ctx.tx, shard, &response.frames, &response.cursor)?;
@@ -72,14 +113,48 @@ impl ReplicaEngine {
             }
             self.publish_round(ctx, shard, &download, &response.cursor, store, &mut evicted)
                 .map(Some)
-        })?;
+        });
+        let published = match published {
+            Ok(published) => published,
+            // A staged baseline the server can no longer answer coherently is
+            // forgotten, not resumed: the shard bootstraps again. An incremental
+            // round keeps its checkpoint and fails; a first page fails.
+            Err(error @ ReplicaError::Protocol { .. })
+                if download.reset && download.cursor.is_some() =>
+            {
+                return self.forget_round(shard, store, &current, error);
+            }
+            // History the base cannot absorb means the base is no longer the
+            // server's: only a baseline replaces it. A baseline that cannot be
+            // absorbed is the server's fault and fails.
+            Err(error @ ReplicaError::MissingCausalDeps) if !download.reset => {
+                return self.forget_round(shard, store, &current, error);
+            }
+            Err(error) => return Err(error),
+        };
         Ok(match published {
             Some(count) => {
                 self.evict_lifetimes(&evicted);
-                (count, false)
+                PullStep::published(count)
             }
-            None => (0, true),
+            None => PullStep::STAGED,
         })
+    }
+
+    fn forget_round(
+        &self,
+        shard: &str,
+        store: &Arc<ReplicaStateStore>,
+        current: &dyn Fn(&rusqlite::Connection) -> ReplicaResult<bool>,
+        reason: ReplicaError,
+    ) -> ReplicaResult<PullStep> {
+        store.pool().write(|ctx| {
+            if current(&*ctx.tx)? {
+                store.clear_cursor(ctx, shard)?;
+            }
+            Ok(())
+        })?;
+        Ok(PullStep::restarted(reason))
     }
 
     /// The staged pages in order, the rebased local authoring, the cursor and
@@ -314,15 +389,29 @@ impl ReplicaEngine {
             row_type: base.row_type.clone(),
             data: base.data.clone(),
         };
-        if store.gate_hold(&ctx.tx, stream, id)?.is_some() {
+        if let Some(hold) = store.gate_hold(&ctx.tx, stream, id)? {
             if let Some(mut held) = store.snapshot(&ctx.tx, stream, id)? {
+                // A held row keeps the fields the device moved — those that differ
+                // from the base it was held against — and takes the server's value
+                // for every other field, so it leaves as exactly what the device changed.
+                let seen = match ReplicaPreimage::parse(&hold.preimage)? {
+                    ReplicaPreimage::Row { data, .. } => data,
+                    _ => ReplicaFields::new(),
+                };
                 let pushed = self
                     .schema
                     .spec(stream)
                     .and_then(|spec| spec.pushed.as_ref());
                 for (key, value) in &base.data {
-                    if pushed.is_some_and(|fields| !fields.contains(key)) {
+                    if held.data.get(key) == seen.get(key)
+                        || pushed.is_some_and(|fields| !fields.contains(key))
+                    {
                         held.data.insert(key.clone(), value.clone());
+                    }
+                }
+                for key in seen.keys() {
+                    if !base.data.contains_key(key) && held.data.get(key) == seen.get(key) {
+                        held.data.remove(key);
                     }
                 }
                 row = held;
