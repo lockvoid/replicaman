@@ -190,7 +190,11 @@ impl ReplicaCodec for CausalCodec {
 
     fn diff(&self, fold: &[u8], since: Option<&[u8]>) -> ReplicaResult<Vec<u8>> {
         let acked = since.map(Self::tokens).unwrap_or_default();
-        Ok(Self::payload(Self::tokens(fold).into_iter().filter(|token| !acked.contains(token))))
+        Ok(Self::payload(
+            Self::tokens(fold)
+                .into_iter()
+                .filter(|token| !acked.contains(token)),
+        ))
     }
 
     fn version(&self, fold: &[u8]) -> ReplicaResult<Vec<u8>> {

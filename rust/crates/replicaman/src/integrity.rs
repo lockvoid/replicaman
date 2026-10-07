@@ -14,7 +14,11 @@ impl IntegrityHash {
     }
 
     pub fn append(&mut self, value: Option<&[u8]>) {
-        self.0.update(value.map_or(u64::MAX, |bytes| bytes.len() as u64).to_be_bytes());
+        self.0.update(
+            value
+                .map_or(u64::MAX, |bytes| bytes.len() as u64)
+                .to_be_bytes(),
+        );
         if let Some(bytes) = value {
             self.0.update(bytes);
         }
@@ -42,11 +46,17 @@ pub(crate) struct IntegritySnapshot {
 
 impl ReplicaStateStore {
     /// Stream one SQLite snapshot, excluding optimistic rows and local intents.
-    pub(crate) fn integrity_snapshot(&self, db: &Connection, shard: &str) -> ReplicaResult<IntegritySnapshot> {
-        let cursor = self.cursor(db, shard)?.ok_or_else(|| ReplicaError::Protocol {
-            code: "CheckpointRequired".into(),
-            message: "Synchronize before verifying the replica".into(),
-        })?;
+    pub(crate) fn integrity_snapshot(
+        &self,
+        db: &Connection,
+        shard: &str,
+    ) -> ReplicaResult<IntegritySnapshot> {
+        let cursor = self
+            .cursor(db, shard)?
+            .ok_or_else(|| ReplicaError::Protocol {
+                code: "CheckpointRequired".into(),
+                message: "Synchronize before verifying the replica".into(),
+            })?;
         let mut hash = IntegrityHash::new("replicaman-view");
         let mut count = 0;
         let mut statement = db.prepare(
@@ -65,10 +75,15 @@ impl ReplicaStateStore {
             let fold: Option<Vec<u8>> = row.get(7)?;
             let expected: Option<String> = row.get(8)?;
             let actual = base_integrity([
-                Some(stream.as_bytes()), Some(id.as_bytes()), Some(shard.as_bytes()),
-                Some(incarnation.as_bytes()), Some(revision.as_bytes()),
-                row_type.as_deref().map(str::as_bytes), Some(data.as_bytes()),
-                codec.as_deref().map(str::as_bytes), fold.as_deref(),
+                Some(stream.as_bytes()),
+                Some(id.as_bytes()),
+                Some(shard.as_bytes()),
+                Some(incarnation.as_bytes()),
+                Some(revision.as_bytes()),
+                row_type.as_deref().map(str::as_bytes),
+                Some(data.as_bytes()),
+                codec.as_deref().map(str::as_bytes),
+                fold.as_deref(),
             ]);
             if expected.as_deref() != Some(actual.as_str()) {
                 return Err(ReplicaError::Storage(format!(
@@ -81,7 +96,10 @@ impl ReplicaStateStore {
             count += 1;
         }
         Ok(IntegritySnapshot {
-            cursor, generation: self.read_generation(db, shard)?, digest: hash.finish(), count,
+            cursor,
+            generation: self.read_generation(db, shard)?,
+            digest: hash.finish(),
+            count,
         })
     }
 }

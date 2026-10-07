@@ -2,7 +2,12 @@ use replicaman::document_value::{DocumentEntry, DocumentFields, DocumentValue};
 use replicaman_generated_contract::documents::{DeckDefaults, DeckDocument, DeckProjection};
 
 fn default_projection() -> DeckProjection {
-    DeckDocument::new(DeckDefaults::layouts(), DeckDefaults::settings(), Vec::new()).projection()
+    DeckDocument::new(
+        DeckDefaults::layouts(),
+        DeckDefaults::settings(),
+        Vec::new(),
+    )
+    .projection()
 }
 
 #[test]

@@ -1,5 +1,5 @@
 use loro::{ExportMode, LoroDoc};
-use replicaman::transport::{BoxFuture, HttpClient, HttpResponse, HttpReplicaTransport};
+use replicaman::transport::{BoxFuture, HttpClient, HttpReplicaTransport, HttpResponse};
 use replicaman::{
     ReplicaEngine, ReplicaEngineOptions, ReplicaError, ReplicaFields, ReplicaResult, ReplicaSchema,
     ReplicaStreamSpec, ReplicaValue,
@@ -32,7 +32,9 @@ impl HttpClient for Network {
                 .await
                 .map_err(|e| ReplicaError::Transport(e.to_string()))?;
             let status = response.status().as_u16();
-            let retry_after = response.headers().get(reqwest::header::RETRY_AFTER)
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
                 .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());
             let mut bytes = Vec::new();
             while let Some(chunk) = response
@@ -47,7 +49,11 @@ impl HttpClient for Network {
                 }
                 bytes.extend_from_slice(&chunk);
             }
-            Ok(HttpResponse { status, body: bytes, retry_after })
+            Ok(HttpResponse {
+                status,
+                body: bytes,
+                retry_after,
+            })
         })
     }
 }

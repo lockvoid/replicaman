@@ -507,7 +507,12 @@ async fn a_released_patch_leaves_a_field_the_server_moved_alone() {
     wire.queue_pull(
         "user",
         ScriptedPull::new(
-            vec![row_set("notes", "n1", None, fields(&[("title", text("a")), ("rank", text("1"))]))],
+            vec![row_set(
+                "notes",
+                "n1",
+                None,
+                fields(&[("title", text("a")), ("rank", text("1"))]),
+            )],
             "c1",
             false,
         ),
@@ -526,16 +531,30 @@ async fn a_released_patch_leaves_a_field_the_server_moved_alone() {
     wire.queue_pull(
         "user",
         ScriptedPull::new(
-            vec![row_set("notes", "n1", None, fields(&[("title", text("a")), ("rank", text("2"))]))],
+            vec![row_set(
+                "notes",
+                "n1",
+                None,
+                fields(&[("title", text("a")), ("rank", text("2"))]),
+            )],
             "c2",
             false,
         ),
     );
     engine.pull_once("user").await.unwrap();
-    let row = engine.store().unwrap().peek_snapshot("notes", "n1").unwrap().unwrap();
+    let row = engine
+        .store()
+        .unwrap()
+        .peek_snapshot("notes", "n1")
+        .unwrap()
+        .unwrap();
     assert_eq!(
         row.data,
-        fields(&[("title", text("b")), ("blob", text("k1")), ("rank", text("2"))]),
+        fields(&[
+            ("title", text("b")),
+            ("blob", text("k1")),
+            ("rank", text("2"))
+        ]),
         "the held row keeps what the device moved and shows what the server moved"
     );
 

@@ -31,9 +31,9 @@ pub use reference::{ReplicaReference, ReplicaReferenceSpec};
 mod protocol;
 pub mod spawner;
 pub mod store;
+mod sync_store;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
-mod sync_store;
 pub mod transport;
 mod transport_retry;
 pub mod value;
@@ -83,6 +83,6 @@ pub use sync_gate::{
     ReplicaGateHold, SyncChange, SyncChangeKind, SyncGate, SyncGateDecision, SyncGateSignal,
 };
 
-mod sync_status;
 mod integrity;
+mod sync_status;
 pub use sync_status::ReplicaSyncStatus;

@@ -14,9 +14,9 @@
 use std::sync::Arc;
 
 use crate::error::ReplicaError;
-use crate::transport::BoxFuture;
 use crate::models::RowStream;
 use crate::tests::support::*;
+use crate::transport::BoxFuture;
 use crate::value::{ReplicaFields, ReplicaValue};
 use crate::wire::{ReplicaVerdict, verb};
 
@@ -1086,7 +1086,9 @@ async fn a_second_round_the_shard_cannot_publish_reaches_the_caller() {
         );
     }
 
-    let refused = engine.pull_until_caught_up(Some(&["user".to_owned()])).await;
+    let refused = engine
+        .pull_until_caught_up(Some(&["user".to_owned()]))
+        .await;
 
     assert!(
         matches!(refused, Err(ReplicaError::Protocol { ref code, .. }) if code == "InvalidResponse"),
@@ -1119,13 +1121,20 @@ async fn an_undeclared_stream_is_refused_at_receipt_as_an_upgrade() {
     transport.queue_pull(
         "user",
         ScriptedPull::new(
-            vec![row_set("ghosts", "g1", None, fields(&[("title", text("boo"))]))],
+            vec![row_set(
+                "ghosts",
+                "g1",
+                None,
+                fields(&[("title", text("boo"))]),
+            )],
             "c2",
             false,
         ),
     );
 
-    let refused = engine.pull_until_caught_up(Some(&["user".to_owned()])).await;
+    let refused = engine
+        .pull_until_caught_up(Some(&["user".to_owned()]))
+        .await;
 
     assert!(
         matches!(refused, Err(ReplicaError::Protocol { ref code, .. }) if code == "UpgradeRequired"),

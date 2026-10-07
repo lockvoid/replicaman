@@ -1478,7 +1478,12 @@ async fn a_backlog_larger_than_one_pass_cap_is_delivered_without_another_write()
     let writer = engine(store.clone(), transport.clone());
     for index in 0..backlog {
         writer
-            .save_row("notes", &format!("n{index}"), None, &fields(&[("title", text("t"))]))
+            .save_row(
+                "notes",
+                &format!("n{index}"),
+                None,
+                &fields(&[("title", text("t"))]),
+            )
             .await
             .unwrap();
     }

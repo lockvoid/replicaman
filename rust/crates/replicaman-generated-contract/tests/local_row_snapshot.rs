@@ -8,12 +8,27 @@ fn theme() -> Theme {
         ("id".to_owned(), ReplicaValue::from("accent-green")),
     ]);
     let fields = ReplicaFields::from([
-        ("colors".to_owned(), ReplicaValue::Array(vec![ReplicaValue::Object(color)])),
-        ("createdAt".to_owned(), ReplicaValue::from("2026-09-25T06:57:14Z")),
-        ("logoRef".to_owned(), ReplicaValue::from("blob://local-logo")),
-        ("logoUrl".to_owned(), ReplicaValue::from("https://media.example.test/local-logo.png")),
+        (
+            "colors".to_owned(),
+            ReplicaValue::Array(vec![ReplicaValue::Object(color)]),
+        ),
+        (
+            "createdAt".to_owned(),
+            ReplicaValue::from("2026-09-25T06:57:14Z"),
+        ),
+        (
+            "logoRef".to_owned(),
+            ReplicaValue::from("blob://local-logo"),
+        ),
+        (
+            "logoUrl".to_owned(),
+            ReplicaValue::from("https://media.example.test/local-logo.png"),
+        ),
         ("name".to_owned(), ReplicaValue::from("Local theme")),
-        ("updatedAt".to_owned(), ReplicaValue::from("2026-09-25T06:57:14Z")),
+        (
+            "updatedAt".to_owned(),
+            ReplicaValue::from("2026-09-25T06:57:14Z"),
+        ),
         ("userId".to_owned(), ReplicaValue::from(42_i64)),
     ]);
     Theme::decode("local-theme", None, &fields).expect("a complete theme decodes")
@@ -24,7 +39,10 @@ fn the_birth_snapshot_reads_back_as_the_model_the_device_wrote() {
     let theme = theme();
     let decoded = Theme::decode(theme.id(), theme.type_name(), &theme.encode_snapshot());
 
-    assert_eq!(decoded.map(|model| model.encode_snapshot()), Some(theme.encode_snapshot()));
+    assert_eq!(
+        decoded.map(|model| model.encode_snapshot()),
+        Some(theme.encode_snapshot())
+    );
 }
 
 #[test]

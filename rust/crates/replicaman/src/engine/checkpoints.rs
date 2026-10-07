@@ -79,7 +79,10 @@ impl ReplicaEngine {
                     }
                     Ok(())
                 })?;
-                return Ok(PullStep::restarted(ReplicaError::Protocol { code, message }));
+                return Ok(PullStep::restarted(ReplicaError::Protocol {
+                    code,
+                    message,
+                }));
             }
             answer => answer?,
         };
@@ -91,7 +94,10 @@ impl ReplicaEngine {
                 None => {
                     return Err(ReplicaError::Protocol {
                         code: "UpgradeRequired".into(),
-                        message: format!("Pulled frame names an undeclared stream: {}", frame.stream()),
+                        message: format!(
+                            "Pulled frame names an undeclared stream: {}",
+                            frame.stream()
+                        ),
                     });
                 }
                 Some(spec) if spec.shard != shard => {
